@@ -236,7 +236,7 @@ class ProtenixFormattingMixin:
             ligands.append(
                 {
                     "ligand": {
-                        "ligand": ligand.protenix_formatted,
+                        "ligand": ligand.ligand,
                         "count": ligand.count,
                     },
                 }
@@ -247,7 +247,7 @@ class ProtenixFormattingMixin:
             ions.append(
                 {
                     "ion": {
-                        "ion": ion.protenix_formatted,
+                        "ion": ion.ion,
                         "count": ion.count,
                     },
                 }
