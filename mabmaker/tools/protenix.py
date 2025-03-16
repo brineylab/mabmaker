@@ -7,6 +7,7 @@ import concurrent.futures as cf
 import os
 from typing import Iterable
 
+import abutils
 from tqdm.auto import tqdm
 
 from ..utils.inputs import StructurePredictionRun, setup_structure_prediction_run
@@ -66,7 +67,11 @@ def protenix(
     futures = []
     with cf.ThreadPoolExecutor(max_workers=num_gpus) as executor:
         for run in runs:
-            cmd = _build_protenix_command(run, output_path, use_msa_server)
+            cmd = _build_protenix_command(
+                run=run,
+                output_path=output_path,
+                use_msa_server=use_msa_server,
+            )
             futures.append(executor.submit(gpu_worker, cmd, gpu_queue))
 
         # monitor progress
@@ -79,6 +84,7 @@ def protenix(
                 pbar.update(1)
 
     # write prediction logs (stdout and stderr)
+    abutils.io.make_dir(os.path.join(output_path, run.name))
     for run, future in zip(runs, futures):
         result = future.result()
         with open(os.path.join(output_path, run.name, "stdout.log"), "w") as f:
@@ -89,7 +95,7 @@ def protenix(
 
 def _build_protenix_command(
     run: StructurePredictionRun,
-    out_dir: str,
+    output_path: str,
     use_msa_server: bool = True,
 ) -> str:
     """
@@ -111,17 +117,20 @@ def _build_protenix_command(
     command : str
         The command to run.
 
+
+    .. _Protenix: https://github.com/bytedance/Protenix
+
     """
     seeds = ",".join(run.seeds)
 
     # build Protenix-formatted input JSON file
-    json_path = os.path.join(out_dir, f"{run.name}.json")
+    json_path = os.path.join(output_path, f"{run.name}.json")
     run.build_protenix_input(json_path)
 
     # build command
     cmd = "protenix predict"
     cmd += f" --input '{json_path}'"
-    cmd += f" --out_dir '{out_dir}'"
+    cmd += f" --out_dir '{output_path}'"
     cmd += f" --seeds {seeds}"
     if use_msa_server:
         cmd += " --use_msa_server"
