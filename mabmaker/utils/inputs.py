@@ -26,7 +26,7 @@ def setup_structure_prediction_run(
     Setup structure prediction runs from a JSON file.
     """
     # setup output directory structure
-    abutils.io.make_dir(output_path)
+    os.makedirs(output_path, exist_ok=True)
 
     # read input file(s)
     magika = Magika()
