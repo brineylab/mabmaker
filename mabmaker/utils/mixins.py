@@ -62,6 +62,18 @@ class ChaiFormattingMixin:
                 for _ in range(self.num_entities(kind="glycan", include_copies=True))
             ]
         )
+        ligand_chain_names = deque(
+            [
+                next(chain_gen)
+                for _ in range(self.num_entities(kind="ligand", include_copies=True))
+            ]
+        )
+        ion_chain_names = deque(
+            [
+                next(chain_gen)
+                for _ in range(self.num_entities(kind="ion", include_copies=True))
+            ]
+        )
 
         # protein chains (FASTA only, protein-glycan bond constraints will be added later)
         for chain_idx, chain in enumerate(self.protein_chains):
@@ -96,6 +108,18 @@ class ChaiFormattingMixin:
                         f"{protein_chain_name},N{glycan.position}@N,{glycan_chain_name},@C1,covalent,1.0,0.0,0.0,protein-glycan,bond{bond_counter}"
                     )
                     bond_counter += 1
+
+        # ligands
+        for ligand_idx, ligand in enumerate(self.ligands):
+            for copy_idx in range(ligand.count):
+                fasta = f">ligand|chain{ligand_idx}_copy{copy_idx+1}\n{ligand.ligand}"
+                fastas.append(fasta)
+
+        # ions
+        for ion_idx, ion in enumerate(self.ions):
+            for copy_idx in range(ion.count):
+                fasta = f">ion|chain{ion_idx}_copy{copy_idx+1}\n{ion.ion}"
+                fastas.append(fasta)
 
         # write to file
         if output_path is not None:
