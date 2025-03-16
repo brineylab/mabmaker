@@ -5,5 +5,10 @@ natsort
 numpy
 prody
 pyyaml
+requests
 torch
 tqdm
+# models
+boltz
+chai_lab
+protenix
