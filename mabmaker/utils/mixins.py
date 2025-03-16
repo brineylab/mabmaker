@@ -26,9 +26,10 @@ class BoltzFormattingMixin:
 class ChaiFormattingMixin:
     def build_chai_input(self, output_path: str | None = None) -> Tuple[str, str]:
         fastas = []
-        constraints = [
+        constraints_header = [
             "chainA,res_idxA,chainB,res_idxB,connection_type,confidence,min_distance_angstrom,max_distance_angstrom,comment,restraint_id"
         ]
+        constraints = []
 
         # get chain names for all entity types (including copies)
         chain_gen = get_chain_name_generator("chai")
@@ -127,9 +128,12 @@ class ChaiFormattingMixin:
             fasta_path = os.path.join(output_path, f"{self.name}.fasta")
             with open(fasta_path, "w") as f:
                 f.write("\n".join(fastas))
-            constraints_path = os.path.join(output_path, f"{self.name}.constraints")
-            with open(constraints_path, "w") as f:
-                f.write("\n".join(constraints))
+            if constraints:
+                constraints_path = os.path.join(output_path, f"{self.name}.constraints")
+                with open(constraints_path, "w") as f:
+                    f.write("\n".join(constraints_header + constraints))
+            else:
+                constraints_path = None
             return fasta_path, constraints_path
         else:
             return "\n".join(fastas), "\n".join(constraints)
