@@ -2,11 +2,12 @@
 # Distributed under the terms of the MIT License.
 # SPDX-License-Identifier: MIT
 
-from typing import Optional, Union
+from typing import Iterable, Optional, Union
 
 import click
 
 from ..tools.ligandmpnn import ligandmpnn as run_ligandmpnn
+from ..tools.protenix import protenix as run_protenix
 
 
 @click.group()
@@ -169,7 +170,7 @@ def ligandmpnn(
     save_stats: bool = True,
     verbose: bool = True,
     debug: bool = False,
-):
+) -> None:
     run_ligandmpnn(
         pdb_path=pdb_path,
         output_dir=output_dir,
@@ -194,4 +195,42 @@ def ligandmpnn(
         verbose=verbose,
         debug=debug,
         started_from_cli=True,
+    )
+
+
+@cli.command()
+@click.argument(
+    "json_path",
+    type=str,
+    required=True,
+    # help="Path to the input JSON file or a directory of JSON files.",
+)
+@click.argument(
+    "output_path",
+    type=str,
+    required=True,
+    # help="Path to the output directory. It will be created if it does not exist.",
+)
+@click.option(
+    "--gpus",
+    type=str,
+    default=None,
+    help="GPU(s) to use, for example '0' or '0,1'. If not provided, all available GPUs will be used.",
+)
+@click.option(
+    "--use_msa_server/--use_esm_embeddings",
+    default=True,
+    help="Use the MSA server to get the MSA.",
+)
+def protenix(
+    json_path: str,
+    output_path: str,
+    gpus: int | Iterable[int] | None = None,
+    use_msa_server: bool = True,
+) -> None:
+    run_protenix(
+        json_path=json_path,
+        output_path=output_path,
+        gpus=gpus,
+        use_msa_server=use_msa_server,
     )
