@@ -3,268 +3,193 @@
 # SPDX-License-Identifier: MIT
 
 
-import json
+import concurrent.futures as cf
 import os
-from pathlib import Path
 from typing import Iterable
 
 import abutils
-import magika
-import pandas as pd
-from chai_lab.chai1 import run_inference
-from natsort import natsorted
+from tqdm.auto import tqdm
+
+from ..utils.inputs import StructurePredictionRun, setup_structure_prediction_run
+from ..utils.jobs import get_gpu_queue, gpu_worker
 
 
-def chai1(
-    fasta_path: str,
+def chai(
+    json_path: str,
     output_path: str,
-    use_esm_embeddings: bool = False,
-    # use_msa_server: bool = True,
+    gpus: int | Iterable[int] | None = None,
+    use_msa_server: bool = True,
     msa_server_url: str = "https://api.colabfold.com",
+    use_templates_server: bool = False,
     msa_directory: str | None = None,
     num_trunk_recycles: int = 3,
+    num_trunk_samples: int = 1,
     num_diffusion_timesteps: int = 200,
     num_diffusion_samples: int = 5,
-    constraints: str | None = None,
-    glycans: str | None = None,
-    numbering_reference: str | None = None,
-    seed: int | Iterable[int] = 42,
-    device: str | None = None,
     low_memory: bool = False,
-    verbose: bool = False,
-    debug: bool = False,
-    started_from_cli: bool = False,
 ) -> None:
     """
-    Run inference with `Chai-1`_.
+    Structure prediction with `Chai-1`_.
 
     Parameters
     ----------
-    fasta_path : str, required
-        Path to the input FASTA file or a directory of FASTA files. If a directory,
-        each FASTA file in the directory will be processed separately.
+    json_path : str
+        The path to the JSON file containing the input parameters, or a folder containing
+        one or more JSON files. Each JSON file should follow the schema of the
+        `AlphaFold3 input JSON file`_, which allows for multiple runs to be specified in
+        a single file.
 
-    output_path : str, required
-        Path to the output directory. If it does not exist, it will be created.
+    output_path : str
+        The path to the output directory. If it does not exist, it will be created.
 
-    use_esm_embeddings : bool, optional, default=False
-        Whether to use ESM embeddings instead of MSAs for the input sequence.
+    numbering_reference : str | None, optional
+        The path to a PDB file containing the numbering reference. If provided, the
+        residues in the input JSON files will be renumbered based on the numbering in
+        the PDB file.
+
+    gpus : Union[int, Iterable, None], optional, default=None
+        GPU(s) to use. Can be provided as:
+            - a single integer: ``0``
+            - a comma-separated string of integers: ``"0,1"``
+            - a list or tuple of integers: ``[0, 1]``
+        If not provided, all available GPUs will be used.
+
+    use_msa_server : bool, optional, default=True
+        Whether to use the MSA server. If ``False``, ESM embeddings will be used instead.
 
     msa_server_url : str, optional, default="https://api.colabfold.com"
-        URL of the MSA server to use.
+        The URL of the MSA server.
+
+    .. _Chai-1: https://github.com/chaidiscovery/chai-lab/tree/main?tab=readme-ov-file
+    .. _AlphaFold3 input JSON file: https://github.com/google-deepmind/alphafold/tree/main/server
+
+    """
+    # setup runs
+    runs = setup_structure_prediction_run(json_path, output_path)
+
+    # get GPU queue
+    gpu_queue = get_gpu_queue(gpus)
+    num_gpus = gpu_queue.qsize()
+
+    # run predictions
+    futures = []
+    with cf.ThreadPoolExecutor(max_workers=num_gpus) as executor:
+        for run in runs:
+            for seed in run.seeds:
+                cmd = _build_chai_command(
+                    run=run,
+                    output_path=output_path,
+                    seed=seed,
+                    use_msa_server=use_msa_server,
+                    msa_server_url=msa_server_url,
+                    use_templates_server=use_templates_server,
+                    msa_directory=msa_directory,
+                    num_trunk_recycles=num_trunk_recycles,
+                    num_trunk_samples=num_trunk_samples,
+                    num_diffusion_timesteps=num_diffusion_timesteps,
+                    num_diffusion_samples=num_diffusion_samples,
+                    low_memory=low_memory,
+                )
+                futures.append(executor.submit(gpu_worker, cmd, gpu_queue))
+
+        # monitor progress
+        with tqdm(
+            total=len(futures),
+            desc="Chai-1",
+            bar_format="{desc}{percentage:3.0f}%|{bar:25}{r_bar}",
+        ) as pbar:
+            for _ in cf.as_completed(futures):
+                pbar.update(1)
+
+    # write prediction logs (stdout and stderr)
+    abutils.io.make_dir(os.path.join(output_path, run.name))
+    for run, future in zip(runs, futures):
+        result = future.result()
+        with open(os.path.join(output_path, run.name, "stdout.log"), "w") as f:
+            f.write(result.stdout.decode("utf-8"))
+        with open(os.path.join(output_path, run.name, "stderr.log"), "w") as f:
+            f.write(result.stderr.decode("utf-8"))
+
+
+def _build_chai_command(
+    run: StructurePredictionRun,
+    output_path: str,
+    seed: int = 42,
+    use_msa_server: bool = True,
+    msa_server_url: str = "https://api.colabfold.com",
+    use_templates_server: bool = False,
+    msa_directory: str | None = None,
+    num_trunk_recycles: int = 3,
+    num_trunk_samples: int = 1,
+    num_diffusion_timesteps: int = 200,
+    num_diffusion_samples: int = 5,
+    low_memory: bool = False,
+) -> str:
+    """
+    Build a command for running `Chai-1`_.
+
+    Parameters
+    ----------
+    run : StructurePredictionRun
+        The run to build the command for.
+
+    output_path : str
+        The path to the output directory.
+
+    use_msa_server : bool, optional, default=True
+        Whether to use the MSA server.
+
+    msa_server_url : str, optional, default="https://api.colabfold.com"
+        The URL of the MSA server.
 
     msa_directory : str, optional
-        Path to the directory containing MSAs. If provided, the MSAs in the directory
-        will be used instead of the MSA server. If `use_esm_embeddings` is ``True``,
-        the MSAs in the directory will be ignored.
+        The path to the directory containing the MSAs.
 
     num_trunk_recycles : int, optional, default=3
-        Number of trunk recycles to perform.
+        The number of trunk recycles to perform.
 
     num_diffusion_timesteps : int, optional, default=200
-        Number of diffusion timesteps to use.
+        The number of diffusion timesteps to use.
 
     num_diffusion_samples : int, optional, default=5
-        Number of diffusion samples to generate.
-
-    constraints : str, optional
-        Path to a CSV-formatted constraints file. If both `constraints` and `glycans`
-        are provided, the constraints required for glycans will be appended to the
-        provided constraints file and the combined constraints file will be used.
-
-    glycans : str, optional
-        Path to a JSON-formatted file containing glycosylation sites.
-        If provided as a dictionary mapping chains to positions::
-
-        ``` json
-        {
-            "A": {160: "NAG(4-1 NAG(6-1 MAN(6-1(MAN(6-1 MAN))))))", 332: "NAG(4-1 NAG)"},
-            "B": {157: "NAG(4-1 NAG)", 334: "NAG(4-1 NAG(6-1 MAN(6-1(MAN(6-1 MAN))))))"},
-        }
-        ```
-
-        The glycan sites will be applied to all FASTA files (if a directory is provided).
-        If provided as a dictionary mapping FASTA file names to nested dictionaries mapping chains to positions and glycan type::
-
-        ``` json
-        {
-            "fasta_file.fasta": {
-                "A": {160: "NAG(4-1 NAG(6-1 MAN(6-1(MAN(6-1 MAN))))))", 334: "NAG(4-1 NAG)"},
-                "B": {157: "NAG(4-1 NAG)", 334: "NAG(4-1 NAG(6-1 MAN(6-1(MAN(6-1 MAN))))))"},
-            }
-        }
-        ```
-
-        The glycan sites will be applied to the specified FASTA file. If any of the input
-        FASTA files or chains are not found, no glycans will be applied.
-
-    numbering_reference : str, optional
-        Path to a JSON file containing sequences to be used as a reference for
-        calculating glycan site numbering. Should map chains to a reference sequence (as a string)::
-
-        ``` json
-        {
-            "A": "METFLISDLKIHITER",
-            "B": "METFLISDLKIHITER",
-        }
-        ```
-
-        Or a JSON file mapping FASTA file names to chains and reference sequences::
-
-        ``` json
-        {
-            "fasta_file.fasta": {
-                "A": "METFLISDLKIHITER",
-                "B": "METFLISDLKIHITER",
-            }
-        }
-        ```
-
-    seed : int, optional, default=42
-        Random seed.
-
-    device : str, optional
-        Device to use. If `device` is not provided and `fasta_path` is the path to a
-        single FASTA file, the device will be set to ``"cuda"``. If `device` is not
-        provided and `fasta_path` is the path to a directory of FASTA files, jobs will
-        be distributed across available GPUs. If `device` is not provided and CUDA is
-        not available, the device will be set to ``"cpu"``.
-
-    low_memory : bool, optional, default=False
-        Whether to use low memory mode.
-
-    verbose : bool, optional, default=False
-        Whether to print verbose output.
-
-    debug : bool, optional, default=False
-        Whether to print debug output.
-
-    started_from_cli : bool, optional, default=False
-        Whether the function was called from the CLI. This changes logging behavior.
+        The number of diffusion samples to generate.
 
     Returns
     -------
-    None
+    command : str
+        The command to run.
+
 
     .. _Chai-1: https://github.com/chaidiscovery/chai-lab/tree/main?tab=readme-ov-file
 
     """
-    # TODO:
-    #  INPUT/OUTPUT
-    #  - check whether fasta_path is a file or a directory
-    #      - if a directory, make a list of all FASTA files; if not, make a single-element list of the FASTA file
-    #  - check whether output_path exists; if not, create it
+    # build Chai-formatted input files
+    fasta_path, constraints_path = run.build_chai_input(output_path)
 
-    #  GLYCANS AND OTHER CONSTRAINTS
-    #  - if constraints is provided, make sure it exists
-    #  - if glycans is provided, parse it
-    #  - if numbering_reference is provided, parse it
-    #      - if numbering_reference is provided but glycans is not, raise an error
-    #  - use glycans and numbering_reference to calculate glycan positions
-    #  - if glycans and constraints are both provided, append the glycan constraints to the constraints file
+    # build command
+    cmd = "chai-lab fold"
+    if constraints_path is not None:
+        cmd += f" --constraint-path '{constraints_path}'"
+    cmd += f" --seed {seed}"
+    if use_msa_server:
+        cmd += " --use-msa-server"
+        cmd += f" --msa-server-url '{msa_server_url}'"
+    if msa_directory is not None:
+        cmd += f" --msa-directory '{msa_directory}'"
+    if use_templates_server:
+        cmd += " --use-templates-server"
+    cmd += f" --num-trunk-recycles {num_trunk_recycles}"
+    cmd += f" --num-trunk-samples {num_trunk_samples}"
+    cmd += f" --num-diffn-timesteps {num_diffusion_timesteps}"
+    cmd += f" --num-diffn-samples {num_diffusion_samples}"
+    if low_memory:
+        cmd += " --low-memory"
 
-    #  SEED AND DEVICE
-    #  - verify that seed is an integer
-    #  - check whether device has been provided
-    #      - if not, set to:
-    #          - "cuda" if CUDA is available and `fasta_path` is the path to a single FASTA file
-    #          - use all CUDA devices (queue and thread pool) if CUDA is available and `fasta_path` is the path to a directory of FASTA files
-    #          - "cpu" if CUDA is not available
-
-    # output directory
-    abutils.io.make_dir(output_path)
-
-    # setup logging
-    global logger
-    if started_from_cli:
-        abutils.log.setup_logging(
-            logfile=os.path.join(output_path, "chai1.log"),
-            add_stream_handler=verbose,
-            single_line_handler=False,
-            print_log_location=False,
-            debug=debug,
-        )
-        logger = abutils.log.get_logger(
-            name="chai1",
-            add_stream_handler=verbose,
-            single_line_handler=False,
-        )
-    elif verbose:
-        logger = abutils.log.NotebookLogger(verbose=verbose, end="")
-    else:
-        logger = abutils.log.null_logger()
-
-    # FASTA path(s)
-    if isinstance(fasta_path, str):
-        if os.path.isdir(fasta_path):
-            fastas = [
-                fasta
-                for fasta in abutils.io.list_files(fasta_path)
-                if abutils.io.determine_fastx_format(fasta) == "fasta"
-            ]
-        else:
-            fastas = [fasta_path]
-    else:
-        fastas = natsorted(fasta_path)
-    fastas = [os.path.abspath(fasta) for fasta in fastas if os.path.isfile(fasta)]
-    if len(fastas) == 0:
-        raise FileNotFoundError(f"No FASTA files found in {fasta_path}")
-    fasta_names = [
-        ".".join(os.path.basename(fasta).split(".")[:-1]) for fasta in fastas
-    ]
-
-    # log FASTA file info (only if started from CLI)
-    if started_from_cli:
-        log_fasta_file_info(fastas=fastas)
-
-    # check constraints file
-    if constraints is not None:
-        check_file_exists_and_is_correct_format(constraints, "constraints" "csv")
-        base_constraints_df = pd.read_csv(constraints)
-    else:
-        base_constraints_df = None
-
-    # check glycans file
-    if glycans is not None:
-        check_file_exists_and_is_correct_format(glycans, "glycans" "json")
-        with open(glycans, "r") as f:
-            glycans_dict = json.load(f)
-    else:
-        glycans_dict = {}
-
-    # check numbering_reference file
-    if numbering_reference is not None:
-        check_file_exists_and_is_correct_format(
-            numbering_reference, "numbering reference", "json"
-        )
-        with open(numbering_reference, "r") as f:
-            numbering_reference_dict = json.load(f)
-    else:
-        numbering_reference_dict = {}
-
-
-def log_fasta_file_info(fastas: Iterable[str]) -> None:
-    num_files = len(fastas)
-    plural = "s" if num_files > 1 else ""
-    logger.info("")
-    logger.info("INPUT FILES")
-    logger.info("===========")
-    logger.info(f"found {num_files} input FASTA file{plural}:")
-    if num_files < 6:
-        for fasta in fastas:
-            logger.info(f"  {os.path.basename(fasta)}")
-    else:
-        for fasta in fastas[:5]:
-            logger.info(f"  {os.path.basename(fasta)}")
-        logger.info(f"  ... and {num_files - 5} more")
-    logger.info("")
-
-
-def check_file_exists_and_is_correct_format(
-    file: str, file_kind: str, filetype: str | None
-) -> None:
-    if not os.path.isfile(file):
-        raise FileNotFoundError(f"{file_kind} file not found: {file}")
-    if filetype is not None:
-        if magika.identify_path(Path(file)).output.label != filetype:
-            raise ValueError(f"{file_kind} file must be a {filetype} file: {file}")
+    # Chai-1 freaks out if the output dir isn't empty, and ours already has
+    # the FASTA and constraint files and maybe data from previous seeds
+    #
+    # TODO: redo logging so that each run logs into its own directory
+    # after the prediction is complete
+    chai_output_path = os.path.join(output_path, f"seed_{seed}")
+    cmd += f" '{fasta_path}' '{chai_output_path}'"
+    return cmd
