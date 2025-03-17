@@ -202,7 +202,7 @@ class BoltzFormattingMixin:
             ion_ids = [ion_chain_names.popleft() for _ in range(ion.count)]
             ligands.append(
                 {
-                    "ion": {
+                    "ligand": {
                         "id": ion_ids,
                         "ccd": ion.ion,
                     }
