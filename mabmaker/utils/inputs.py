@@ -132,7 +132,9 @@ class StructurePredictionRun(
     def num_ions(self):
         return sum(ion.count for ion in self.ions)
 
-    def num_entities(self, kind: str, include_copies: bool = False):
+    def num_entities(
+        self, kind: str, include_copies: bool = False, separate_ccds: bool = False
+    ):
         """
         Get the number of entities of a given kind.
 
@@ -145,6 +147,10 @@ class StructurePredictionRun(
             Whether to include the number of copies of each entity. Default is ``False``,
             which counts each entity once regardless of how many copies there are.
 
+        separate_ccds : bool, optional
+            Whether to count each CCD as a separate entity. Only relevant for glycans.
+            Default is ``False``, which counts multi-CCD glycans as a single entity.
+
         Returns
         -------
         int
@@ -155,7 +161,12 @@ class StructurePredictionRun(
         if kind.lower() == "glycan":
             num_entities = 0
             for chain in self.protein_chains:
-                num_glycans = len(chain.glycans)
+                if separate_ccds:
+                    num_glycans = sum(
+                        len(glycan.ccd_list()) for glycan in chain.glycans
+                    )
+                else:
+                    num_glycans = len(chain.glycans)
                 if include_copies:
                     num_glycans *= chain.count
                 num_entities += num_glycans
@@ -247,6 +258,10 @@ class Glycan:
         if self.residues is not None:
             return "CCD_" + self.residues.rstrip(")").replace("(", "_")
 
+    def ccd_list(self):
+        if self.residues is not None:
+            return self.residues.rstrip(")").split("(")
+
 
 class ModificationMixin:
     def parse_modifications(self):
@@ -292,6 +307,7 @@ class ProteinChain(Entity, ModificationMixin, GlycanMixin):
     def __init__(self, sequence: dict):
         super().__init__(sequence)
         self.kind = "proteinChain"
+        self.msa = sequence.get("msa", None)
         self.glycans = self.parse_glycans()
         self.modifications = self.parse_modifications()
         self.use_structure_template = sequence.get("useStructureTemplate", True)
