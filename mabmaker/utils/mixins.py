@@ -8,6 +8,7 @@ from collections import deque
 from typing import Tuple
 
 import abutils
+import yaml
 
 from .chains import get_chain_name_generator
 
@@ -19,8 +20,211 @@ from .chains import get_chain_name_generator
 
 
 class BoltzFormattingMixin:
-    def build_boltz_input(self, output_path: str):
-        pass
+    def build_boltz_input(self, output_path: str | None = None) -> str:
+        sequences = []
+        ligands = []
+        constraints = []
+
+        def ccd_bond_atom_lookup(glycan_ccd: str):
+            ccd_dict = {
+                "NAG": "O4",
+                "MAN": "O6",
+            }
+            return ccd_dict.get(glycan_ccd, None)
+
+        # get chain names for all entity types (including copies)
+        chain_gen = get_chain_name_generator("boltz")
+        protein_chain_names = deque(
+            [
+                next(chain_gen)
+                for _ in range(
+                    self.num_entities(kind="proteinChain", include_copies=True)
+                )
+            ]
+        )
+        dna_chain_names = deque(
+            [
+                next(chain_gen)
+                for _ in range(
+                    self.num_entities(kind="dnaSequence", include_copies=True)
+                )
+            ]
+        )
+        rna_chain_names = deque(
+            [
+                next(chain_gen)
+                for _ in range(
+                    self.num_entities(kind="rnaSequence", include_copies=True)
+                )
+            ]
+        )
+        glycan_chain_names = deque(
+            [
+                next(chain_gen)
+                for _ in range(
+                    self.num_entities(
+                        kind="glycan", include_copies=True, separate_ccds=True
+                    )
+                )
+            ]
+        )
+        ligand_chain_names = deque(
+            [
+                next(chain_gen)
+                for _ in range(self.num_entities(kind="ligand", include_copies=True))
+            ]
+        )
+        ion_chain_names = deque(
+            [
+                next(chain_gen)
+                for _ in range(self.num_entities(kind="ion", include_copies=True))
+            ]
+        )
+
+        # protein chains
+        for chain in self.protein_chains:
+            protein_ids = [protein_chain_names.popleft() for _ in range(chain.count)]
+            sequence = {
+                "protein": {
+                    "id": protein_ids,
+                    "sequence": chain.sequence,
+                }
+            }
+            # only add modifications or MSA if they exist
+            if chain.modifications:
+                sequence["protein"]["modifications"] = [
+                    {
+                        "position": m.position,
+                        "ccd": m.modification_type,
+                    }
+                    for m in chain.modifications
+                ]
+            if chain.msa is not None:
+                sequence["protein"]["msa"] = chain.msa
+            sequences.append(sequence)
+
+            # add glycans (if present)
+            for glycan in chain.glycans:
+                # boltz requires a separate ligand entry (and bond) for each CCD in the glycan
+                glycan_ccd_list = glycan.ccd_list()
+                for ccd_idx, glycan_ccd in enumerate(glycan_ccd_list):
+                    glycan_ccd_ids = [
+                        glycan_chain_names.popleft() for _ in range(chain.count)
+                    ]
+                    ligands.append(
+                        {
+                            "ligand": {
+                                "id": glycan_ccd_ids,
+                                "ccd": glycan_ccd,
+                            }
+                        }
+                    )
+                    # add covalent bonds between glycan and protein
+                    for protein_copy_id, glycan_ccd_copy_id in zip(
+                        protein_ids, glycan_ccd_ids
+                    ):
+                        if ccd_idx == 0:
+                            prev_chain_id = protein_copy_id
+                            prev_atom_name = "ND2"
+                            prev_atom_position = glycan.position
+                        else:
+                            prev_chain_id = glycan_ccd_ids[ccd_idx - 1]
+                            prev_atom_name = ccd_bond_atom_lookup(
+                                glycan_ccd_list[ccd_idx - 1]
+                            )
+                            prev_atom_position = 1
+                        constraints.append(
+                            {
+                                "bond": {
+                                    "atom1": [
+                                        prev_chain_id,
+                                        prev_atom_position,
+                                        prev_atom_name,
+                                    ],
+                                    "atom2": [glycan_ccd_copy_id, 1, "C1"],
+                                }
+                            }
+                        )
+        # DNA sequences
+        for seq in self.dna_sequences:
+            dna_ids = [dna_chain_names.popleft() for _ in range(seq.count)]
+            sequence = {
+                "dna": {
+                    "id": dna_ids,
+                    "sequence": seq.sequence,
+                }
+            }
+            # only add modifications if they exist
+            if seq.modifications:
+                sequence["dna"]["modifications"] = [
+                    {
+                        "position": m.position,
+                        "ccd": m.modification_type,
+                    }
+                    for m in seq.modifications
+                ]
+            sequences.append(sequence)
+
+        # RNA sequences
+        for seq in self.rna_sequences:
+            rna_ids = [rna_chain_names.popleft() for _ in range(seq.count)]
+            sequence = {
+                "rna": {
+                    "id": rna_ids,
+                    "sequence": seq.sequence,
+                }
+            }
+            # only add modifications if they exist
+            if seq.modifications:
+                sequence["rna"]["modifications"] = [
+                    {
+                        "position": m.position,
+                        "ccd": m.modification_type,
+                    }
+                    for m in seq.modifications
+                ]
+            sequences.append(sequence)
+
+        # ligands
+        for ligand in self.ligands:
+            ligand_ids = [ligand_chain_names.popleft() for _ in range(ligand.count)]
+            ligands.append(
+                {
+                    "ligand": {
+                        "id": ligand_ids,
+                        "ccd": ligand.ligand,
+                    }
+                }
+            )
+
+        # ions
+        for ion in self.ions:
+            ion_ids = [ion_chain_names.popleft() for _ in range(ion.count)]
+            ligands.append(
+                {
+                    "ion": {
+                        "id": ion_ids,
+                        "ccd": ion.ion,
+                    }
+                }
+            )
+
+        # pull all the data together
+        yaml_data = {
+            "version": 1,
+            "sequences": sequences + ligands,
+            "constraints": constraints,
+        }
+
+        if output_path is not None:
+            if os.path.isdir(output_path):
+                output_path = os.path.join(output_path, f"{self.name}.yaml")
+            abutils.io.make_dir(os.path.dirname(output_path))
+            with open(output_path, "w") as f:
+                yaml.dump(yaml_data, f)
+            return output_path
+        else:
+            return yaml.dump(yaml_data)
 
 
 class ChaiFormattingMixin:
