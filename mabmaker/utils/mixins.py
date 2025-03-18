@@ -323,7 +323,7 @@ class ChaiFormattingMixin:
         # ions
         for ion_idx, ion in enumerate(self.ions):
             for copy_idx in range(ion.count):
-                fasta = f">ion|chain{ion_idx}_copy{copy_idx+1}\n{ion.ion}"
+                fasta = f">ligand|chain{ion_idx}_copy{copy_idx+1}\n{ion.ion}"
                 fastas.append(fasta)
 
         # write to file
