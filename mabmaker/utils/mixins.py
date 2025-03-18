@@ -283,19 +283,21 @@ class ChaiFormattingMixin:
         # protein chains (FASTA only, protein-glycan bond constraints will be added later)
         for chain_idx, chain in enumerate(self.protein_chains):
             for copy_idx in range(chain.count):
-                fasta = f">protein|chain{chain_idx}_copy{copy_idx+1}\n{chain.sequence}"
+                fasta = (
+                    f">protein|protein{chain_idx}_copy{copy_idx+1}\n{chain.sequence}"
+                )
                 fastas.append(fasta)
 
         # DNA sequences
         for seq_idx, seq in enumerate(self.dna_sequences):
             for copy_idx in range(seq.count):
-                fasta = f">dna|sequence{seq_idx}_copy{copy_idx+1}\n{seq.sequence}"
+                fasta = f">dna|dna{seq_idx}_copy{copy_idx+1}\n{seq.sequence}"
                 fastas.append(fasta)
 
         # RNA sequences
         for seq_idx, seq in enumerate(self.rna_sequences):
             for copy_idx in range(seq.count):
-                fasta = f">rna|sequence{seq_idx}_copy{copy_idx+1}\n{seq.sequence}"
+                fasta = f">rna|rna{seq_idx}_copy{copy_idx+1}\n{seq.sequence}"
                 fastas.append(fasta)
 
         # glycans
@@ -305,7 +307,7 @@ class ChaiFormattingMixin:
                 protein_chain_name = protein_chain_names.popleft()
                 for glycan_idx, glycan in enumerate(chain.glycans):
                     # glycan fasta
-                    fasta = f">glycan|chain{chain_idx}_glycan{glycan_idx}_copy{copy_idx+1}\n{glycan.chai_formatted}"
+                    fasta = f">glycan|protein{chain_idx}_glycan{glycan_idx}_copy{copy_idx+1}\n{glycan.chai_formatted}"
                     fastas.append(fasta)
                     # protein-glycan bond constraints
                     glycan_chain_name = glycan_chain_names.popleft()
@@ -317,13 +319,15 @@ class ChaiFormattingMixin:
         # ligands
         for ligand_idx, ligand in enumerate(self.ligands):
             for copy_idx in range(ligand.count):
-                fasta = f">ligand|chain{ligand_idx}_copy{copy_idx+1}\n{ligand.ligand}"
+                fasta = (
+                    f">ligand|ligand{ligand_idx}_copy{ligand_idx+1}\n{ligand.ligand}"
+                )
                 fastas.append(fasta)
 
         # ions
         for ion_idx, ion in enumerate(self.ions):
             for copy_idx in range(ion.count):
-                fasta = f">ligand|chain{ion_idx}_copy{copy_idx+1}\n{ion.ion}"
+                fasta = f">ligand|ion{ion_idx}_copy{ion_idx+1}\n{ion.ion}"
                 fastas.append(fasta)
 
         # write to file
