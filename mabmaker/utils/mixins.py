@@ -319,15 +319,15 @@ class ChaiFormattingMixin:
         # ligands
         for ligand_idx, ligand in enumerate(self.ligands):
             for copy_idx in range(ligand.count):
-                fasta = (
-                    f">ligand|ligand{ligand_idx}_copy{ligand_idx+1}\n{ligand.ligand}"
-                )
+                smiles = CCD_TO_SMILES.get(ligand.ligand, ligand.ligand)
+                fasta = f">ligand|ligand{ligand_idx}_copy{ligand_idx+1}\n{smiles}"
                 fastas.append(fasta)
 
         # ions
         for ion_idx, ion in enumerate(self.ions):
             for copy_idx in range(ion.count):
-                fasta = f">ligand|ion{ion_idx}_copy{ion_idx+1}\n{ion.ion}"
+                smiles = CCD_TO_SMILES.get(ion.ion, ion.ion)
+                fasta = f">ligand|ion{ion_idx}_copy{ion_idx+1}\n{smiles}"
                 fastas.append(fasta)
 
         # write to file
@@ -506,3 +506,22 @@ class ProtenixFormattingMixin:
             return output_path
         else:
             return json.dumps(data, indent=2)
+
+
+CCD_TO_SMILES = {
+    "CA": "[Ca2+]",
+    "CO": "[Co2+]",
+    "CU": "[Cu2+]",
+    "FE": "[Fe3+]",
+    "K": "[K+]",
+    "MG": "[Mg2+]",
+    "MN": "[Mn2+]",
+    "NA": "[Na+]",
+    "ZN": "[Zn2+]",
+    "CL": "[Cl-]",
+}
+
+
+"""
+Ca2+, Co2+, Cu2+, Fe3+, K+, Mg2+, Mn2+, Na+, Zn2+, Cl-
+"""
