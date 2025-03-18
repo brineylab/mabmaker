@@ -110,7 +110,7 @@ def boltz(
         for run in runs:
             # Boltz accepts a single seed, so we need a separate job for each seed
             for seed in run.seeds:
-                _output_path = os.path.join(output_path, "tmp", f"seed_{seed}")
+                _output_path = os.path.join(output_path, "raw_output", f"seed_{seed}")
                 cmd = _build_boltz_command(
                     run=run,
                     output_path=_output_path,
