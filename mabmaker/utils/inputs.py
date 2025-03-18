@@ -81,7 +81,7 @@ class StructurePredictionRun(
     def __init__(self, params: dict):
         self.params = params
         self.name = params.get("name", None)
-        self.seeds = params.get("modelSeeds", ["42"])
+        self.seeds = list(set(params.get("modelSeeds", ["42"])))
         self.dialect = params.get("dialect", "alphafoldserver")
         self.version = params.get("version", 1)
         self.entities = self.parse_entities()
