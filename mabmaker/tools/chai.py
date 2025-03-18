@@ -5,13 +5,16 @@
 
 import concurrent.futures as cf
 import os
+from functools import partial
+from pathlib import Path
 from typing import Iterable
 
-import abutils
+from chai_lab.chai1 import run_inference
 from tqdm.auto import tqdm
 
-from ..utils.inputs import StructurePredictionRun, setup_structure_prediction_run
+from ..utils.inputs import setup_structure_prediction_run
 from ..utils.jobs import get_gpu_queue, gpu_worker
+from ..utils.outputs import process_chai_output
 
 
 def chai(
@@ -20,7 +23,9 @@ def chai(
     gpus: int | Iterable[int] | None = None,
     use_msa_server: bool = True,
     msa_server_url: str = "https://api.colabfold.com",
+    recycle_msa_subsample: int = 0,
     use_templates_server: bool = False,
+    template_hits_path: str | None = None,
     msa_directory: str | None = None,
     num_trunk_recycles: int = 3,
     num_trunk_samples: int = 1,
@@ -42,11 +47,6 @@ def chai(
     output_path : str
         The path to the output directory. If it does not exist, it will be created.
 
-    numbering_reference : str | None, optional
-        The path to a PDB file containing the numbering reference. If provided, the
-        residues in the input JSON files will be renumbered based on the numbering in
-        the PDB file.
-
     gpus : Union[int, Iterable, None], optional, default=None
         GPU(s) to use. Can be provided as:
             - a single integer: ``0``
@@ -59,6 +59,34 @@ def chai(
 
     msa_server_url : str, optional, default="https://api.colabfold.com"
         The URL of the MSA server.
+
+    recycle_msa_subsample : int, optional, default=None
+        Whether to subsample the MSA for each trunk recycle. If ``0``, no subsampling
+        will be performed. If ``>0``, the MSA will be subsampled.
+
+    use_templates_server : bool, optional, default=False
+        Whether to use the templates server.
+
+    template_hits_path : str, optional
+        The path to the template hits file.
+
+    msa_directory : str, optional
+        The path to the directory containing the MSAs.
+
+    num_trunk_recycles : int, optional, default=3
+        The number of trunk recycles to perform.
+
+    num_trunk_samples : int, optional, default=1
+        The number of trunk samples to generate.
+
+    num_diffusion_timesteps : int, optional, default=200
+        The number of diffusion timesteps to use.
+
+    num_diffusion_samples : int, optional, default=5
+        The number of diffusion samples to generate.
+
+    low_memory : bool, optional, default=False
+        Whether to use low memory mode.
 
     .. _Chai-1: https://github.com/chaidiscovery/chai-lab/tree/main?tab=readme-ov-file
     .. _AlphaFold3 input JSON file: https://github.com/google-deepmind/alphafold/tree/main/server
@@ -73,16 +101,23 @@ def chai(
 
     # run predictions
     futures = []
+    output_paths = []
     with cf.ThreadPoolExecutor(max_workers=num_gpus) as executor:
         for run in runs:
+            run_output_path = os.path.join(output_path, run.name, "raw_output")
+            fasta_path, constraint_path = run.build_chai_input(run_output_path)
             for seed in run.seeds:
+                _output_path = os.path.join(run_output_path, f"seed_{seed}")
                 cmd = _build_chai_command(
-                    run=run,
-                    output_path=output_path,
-                    seed=seed,
+                    fasta_path=fasta_path,
+                    output_path=_output_path,
+                    seed=int(seed),
+                    constraint_path=constraint_path,
                     use_msa_server=use_msa_server,
                     msa_server_url=msa_server_url,
+                    recycle_msa_subsample=recycle_msa_subsample,
                     use_templates_server=use_templates_server,
+                    template_hits_path=template_hits_path,
                     msa_directory=msa_directory,
                     num_trunk_recycles=num_trunk_recycles,
                     num_trunk_samples=num_trunk_samples,
@@ -91,6 +126,7 @@ def chai(
                     low_memory=low_memory,
                 )
                 futures.append(executor.submit(gpu_worker, cmd, gpu_queue))
+                output_paths.append(_output_path)
 
         # monitor progress
         with tqdm(
@@ -101,23 +137,32 @@ def chai(
             for _ in cf.as_completed(futures):
                 pbar.update(1)
 
-    # write prediction logs (stdout and stderr)
-    abutils.io.make_dir(os.path.join(output_path, run.name))
-    for run, future in zip(runs, futures):
-        result = future.result()
-        with open(os.path.join(output_path, run.name, "stdout.log"), "w") as f:
-            f.write(result.stdout.decode("utf-8"))
-        with open(os.path.join(output_path, run.name, "stderr.log"), "w") as f:
-            f.write(result.stderr.decode("utf-8"))
+    # process outputs
+    run_idx = 0
+    for run in runs:
+        for seed in run.seeds:
+            run_path = output_paths[run_idx]
+            result = futures[run_idx].result()
+            process_chai_output(
+                result=result,
+                original_path=run_path,
+                processed_path=os.path.join(output_path, run.name),
+                run_name=run.name,
+                seed=seed,
+            )
+            run_idx += 1
 
 
 def _build_chai_command(
-    run: StructurePredictionRun,
+    fasta_path: str,
     output_path: str,
     seed: int = 42,
+    constraint_path: str | None = None,
     use_msa_server: bool = True,
     msa_server_url: str = "https://api.colabfold.com",
+    recycle_msa_subsample: int | None = None,
     use_templates_server: bool = False,
+    template_hits_path: str | None = None,
     msa_directory: str | None = None,
     num_trunk_recycles: int = 3,
     num_trunk_samples: int = 1,
@@ -130,11 +175,17 @@ def _build_chai_command(
 
     Parameters
     ----------
-    run : StructurePredictionRun
-        The run to build the command for.
+    fasta_path : str
+        The path to the FASTA file.
 
     output_path : str
         The path to the output directory.
+
+    seed : int, optional, default=42
+        The seed to use for the prediction.
+
+    constraint_path : str, optional
+        The path to the constraint file.
 
     use_msa_server : bool, optional, default=True
         Whether to use the MSA server.
@@ -142,17 +193,33 @@ def _build_chai_command(
     msa_server_url : str, optional, default="https://api.colabfold.com"
         The URL of the MSA server.
 
+    recycle_msa_subsample : int, optional, default=None
+        Whether to subsample the MSA for each trunk recycle. If ``0``, no subsampling
+        will be performed. If ``>0``, the MSA will be subsampled.
+
+    use_templates_server : bool, optional, default=False
+        Whether to use the templates server.
+
+    template_hits_path : str, optional
+        The path to the template hits file.
+
     msa_directory : str, optional
         The path to the directory containing the MSAs.
 
     num_trunk_recycles : int, optional, default=3
         The number of trunk recycles to perform.
 
+    num_trunk_samples : int, optional, default=1
+        The number of trunk samples to generate.
+
     num_diffusion_timesteps : int, optional, default=200
         The number of diffusion timesteps to use.
 
     num_diffusion_samples : int, optional, default=5
         The number of diffusion samples to generate.
+
+    low_memory : bool, optional, default=False
+        Whether to use low memory mode.
 
     Returns
     -------
@@ -163,33 +230,33 @@ def _build_chai_command(
     .. _Chai-1: https://github.com/chaidiscovery/chai-lab/tree/main?tab=readme-ov-file
 
     """
-    # build Chai-formatted input files
-    fasta_path, constraints_path = run.build_chai_input(output_path)
+    # # build Chai-formatted input files
+    # fasta_path, constraint_path = run.build_chai_input(os.path.dirname(output_path))
 
-    # build command
-    cmd = "chai-lab fold"
-    if constraints_path is not None:
-        cmd += f" --constraint-path '{constraints_path}'"
-    cmd += f" --seed {seed}"
-    if use_msa_server:
-        cmd += " --use-msa-server"
-        cmd += f" --msa-server-url '{msa_server_url}'"
-    if msa_directory is not None:
-        cmd += f" --msa-directory '{msa_directory}'"
-    if use_templates_server:
-        cmd += " --use-templates-server"
-    cmd += f" --num-trunk-recycles {num_trunk_recycles}"
-    cmd += f" --num-trunk-samples {num_trunk_samples}"
-    cmd += f" --num-diffn-timesteps {num_diffusion_timesteps}"
-    cmd += f" --num-diffn-samples {num_diffusion_samples}"
-    if low_memory:
-        cmd += " --low-memory"
+    # embeddings vs MSA
+    if use_msa_server or msa_directory is not None:
+        use_esm_embeddings = False
+    else:
+        use_esm_embeddings = True
 
-    # Chai-1 freaks out if the output dir isn't empty, and ours already has
-    # the FASTA and constraint files and maybe data from previous seeds
-    #
-    # TODO: redo logging so that each run logs into its own directory
-    # after the prediction is complete
-    chai_output_path = os.path.join(output_path, f"seed_{seed}")
-    cmd += f" '{fasta_path}' '{chai_output_path}'"
+    # build partial function call (without device arg)
+    cmd = partial(
+        run_inference,
+        fasta_file=Path(fasta_path),
+        output_dir=Path(output_path),
+        use_esm_embeddings=use_esm_embeddings,
+        use_msa_server=use_msa_server,
+        msa_server_url=msa_server_url,
+        msa_directory=msa_directory,
+        constraint_path=constraint_path,
+        use_templates_server=use_templates_server,
+        template_hits_path=template_hits_path,
+        recycle_msa_subsample=recycle_msa_subsample,
+        num_trunk_recycles=num_trunk_recycles,
+        num_diffn_timesteps=num_diffusion_timesteps,
+        num_diffn_samples=num_diffusion_samples,
+        num_trunk_samples=num_trunk_samples,
+        seed=seed,
+        low_memory=low_memory,
+    )
     return cmd
