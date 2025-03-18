@@ -7,12 +7,14 @@ import os
 import shutil
 
 import abutils
+import numpy as np
+from chai_lab.chai1 import StructureCandidates
 
 
 def process_boltz_output(
     original_path: str,
     processed_path: str,
-    model_name: str,
+    run_name: str,
     seed: int | str,
     stdout: str | None = None,
     stderr: str | None = None,
@@ -44,78 +46,76 @@ def process_boltz_output(
     metrics_path = _get_metrics_path(processed_path)
     msas_path = _get_msas_path(processed_path)
     logs_path = _get_logs_path(processed_path)
+    # raw_output_path = _get_raw_output_path(processed_path)
 
-    # copy predictions
+    # copy models
     for model_path in glob.glob(
-        os.path.join(original_path, "predictions", "*", "*_model_*.cif")
+        os.path.join(original_path, "*", "predictions", "*", "*_model_*.cif")
     ):
         model_num = os.path.basename(model_path).split("_")[-1].split(".")[0]
         shutil.copy(
             model_path,
-            os.path.join(predictions_path, f"{seed}|{model_num}|{model_name}.cif"),
+            os.path.join(predictions_path, f"{seed}|{model_num}|{run_name}.cif"),
         )
 
     # copy metrics -- confidence
     for confidence_path in glob.glob(
-        os.path.join(original_path, "predictions", "*", "confidence*.json")
+        os.path.join(original_path, "*", "predictions", "*", "confidence*.json")
     ):
         model_num = os.path.basename(confidence_path).split("_")[-1].split(".")[0]
         shutil.copy(
             confidence_path,
             os.path.join(
-                confidence_path, "confidence", f"{seed}|{model_num}|{model_name}.json"
+                metrics_path, "confidence", f"{seed}|{model_num}|{run_name}.json"
             ),
         )
 
     # copy metrics -- pde
     for pde_path in glob.glob(
-        os.path.join(original_path, "predictions", "*", "pde*.npz")
+        os.path.join(original_path, "*", "predictions", "*", "pde*.npz")
     ):
         model_num = os.path.basename(pde_path).split("_")[-1].split(".")[0]
         shutil.copy(
             pde_path,
-            os.path.join(metrics_path, "pde", f"{seed}|{model_num}|{model_name}.npz"),
+            os.path.join(metrics_path, "pde", f"{seed}|{model_num}|{run_name}.npz"),
         )
 
     # copy metrics -- pae
     for pae_path in glob.glob(
-        os.path.join(original_path, "predictions", "*", "pae*.npz")
+        os.path.join(original_path, "*", "predictions", "*", "pae*.npz")
     ):
         model_num = os.path.basename(pae_path).split("_")[-1].split(".")[0]
         shutil.copy(
             pae_path,
-            os.path.join(metrics_path, "pae", f"{seed}|{model_num}|{model_name}.npz"),
+            os.path.join(metrics_path, "pae", f"{seed}|{model_num}|{run_name}.npz"),
         )
 
     # copy metrics -- plddt
     for plddt_path in glob.glob(
-        os.path.join(original_path, "predictions", "*", "plddt*.npz")
+        os.path.join(original_path, "*", "predictions", "*", "plddt*.npz")
     ):
         model_num = os.path.basename(plddt_path).split("_")[-1].split(".")[0]
         shutil.copy(
             plddt_path,
-            os.path.join(metrics_path, "plddt", f"{seed}|{model_num}|{model_name}.npz"),
+            os.path.join(metrics_path, "plddt", f"{seed}|{model_num}|{run_name}.npz"),
         )
 
     # copy msas
     abutils.io.make_dir(os.path.join(msas_path, seed))
-    for msa_path in glob.glob(os.path.join(original_path, "msa", "*.csv")):
+    for msa_path in glob.glob(os.path.join(original_path, "*", "msa", "*.csv")):
         shutil.copy(
             msa_path,
             os.path.join(msas_path, seed, os.path.basename(msa_path)),
         )
-    for msa_path in glob.glob(os.path.join(original_path, "msa", "*unpaired*", "*")):
-        shutil.copy(
-            msa_path,
-            os.path.join(msas_path, seed, "unpaired", os.path.basename(msa_path)),
-        )
-    for msa_path in glob.glob(os.path.join(original_path, "msa", "*paired*", "*")):
-        shutil.copy(
-            msa_path,
-            os.path.join(msas_path, seed, "paired", os.path.basename(msa_path)),
-        )
+    for msa_path in glob.glob(os.path.join(original_path, "*", "msa")):
+        if os.path.isdir(msa_path):
+            shutil.copytree(
+                msa_path,
+                os.path.join(msas_path, seed),
+                dirs_exist_ok=True,
+            )
 
-    # write/copy logs
+    # write logs
     abutils.io.make_dir(os.path.join(logs_path, seed))
     if stdout is not None:
         with open(os.path.join(logs_path, seed, "stdout.log"), "w") as f:
@@ -128,9 +128,78 @@ def process_boltz_output(
     ):
         shutil.copytree(
             lightning_logs_path,
-            os.path.join(logs_path, seed),
+            os.path.join(logs_path, seed, "lightning_logs"),
             dirs_exist_ok=True,
         )
+
+
+def process_chai_output(
+    result: StructureCandidates,
+    original_path: str,
+    processed_path: str,
+    run_name: str,
+    seed: int | str,
+) -> None:
+    """
+    Process the outputs of a Chai-1 prediction. The predictions and confidence scores
+    are written as outputs by the model, but the remaining metrics are not. We'll extract
+    them from the `StructureCandidates` object. Also, since the Chai-1 inference function
+    is called directly, we don't have any stdout or stderr to write.
+    """
+    _build_output_directory_structure(processed_path)
+    predictions_path = _get_predictions_path(processed_path)
+    metrics_path = _get_metrics_path(processed_path)
+    msas_path = _get_msas_path(processed_path)
+
+    # copy predictions
+    for model_path in glob.glob(os.path.join(original_path, "pred.model_idx_*.cif")):
+        model_num = os.path.basename(model_path).split("_")[-1].split(".")[0]
+        shutil.copy(
+            model_path,
+            os.path.join(predictions_path, f"{seed}|{model_num}|{run_name}.cif"),
+        )
+
+    # copy metrics -- confidence
+    for confidence_path in glob.glob(
+        os.path.join(original_path, "scores.model_idx_*.npz")
+    ):
+        model_num = os.path.basename(confidence_path).split("_")[-1].split(".")[0]
+        shutil.copy(
+            confidence_path,
+            os.path.join(
+                metrics_path, "confidence", f"{seed}|{model_num}|{run_name}.npz"
+            ),
+        )
+
+    # write metrics -- pde
+    pde_scores = result.pde.numpy()
+    for i, pde_score in enumerate(pde_scores):
+        npz_file = os.path.join(metrics_path, "pde", f"{seed}|{i}|{run_name}.npz")
+        np.savez(npz_file, pde_score)
+
+    # write metrics -- pae
+    pae_scores = result.pae.numpy()
+    for i, pae_score in enumerate(pae_scores):
+        npz_file = os.path.join(metrics_path, "pae", f"{seed}|{i}|{run_name}.npz")
+        np.savez(npz_file, pae_score)
+
+    # write metrics -- plddt
+    plddt_scores = result.plddt.numpy()
+    for i, plddt_score in enumerate(plddt_scores):
+        npz_file = os.path.join(metrics_path, "plddt", f"{seed}|{i}|{run_name}.npz")
+        np.savez(npz_file, plddt_score)
+
+    # copy msas
+    abutils.io.make_dir(os.path.join(msas_path, seed))
+    for msa_path in glob.glob(os.path.join(original_path, "msas", "*.pqt")):
+        shutil.copy(
+            msa_path,
+            os.path.join(msas_path, seed, os.path.basename(msa_path)),
+        )
+    shutil.copy(
+        os.path.join(original_path, "msa_depth.pdf"),
+        os.path.join(msas_path, seed, "msa_depth.pdf"),
+    )
 
 
 """
