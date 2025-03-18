@@ -509,16 +509,18 @@ class ProtenixFormattingMixin:
 
 
 CCD_TO_SMILES = {
-    "CA": "[Ca2+]",
-    "CO": "[Co2+]",
-    "CU": "[Cu2+]",
-    "FE": "[Fe3+]",
+    "CA": "[Ca+2]",
+    "CO": "[Co+2]",
+    "CU": "[Cu+2]",
+    "FE": "[Fe+3]",
     "K": "[K+]",
-    "MG": "[Mg2+]",
-    "MN": "[Mn2+]",
+    "MG": "[Mg+2]",
+    "MN": "[Mn+2]",
     "NA": "[Na+]",
-    "ZN": "[Zn2+]",
+    "ZN": "[Zn+2]",
     "CL": "[Cl-]",
+    "OH": "[OH-]",
+    "H": "[H+]",
 }
 
 
