@@ -140,7 +140,7 @@ def boltz(
             for _ in cf.as_completed(futures):
                 pbar.update(1)
 
-    # write prediction logs (stdout and stderr)
+    # assemble the outputs into a standardized directory schema
     run_idx = 0
     for run in runs:
         for seed in run.seeds:
@@ -151,7 +151,7 @@ def boltz(
             process_boltz_output(
                 original_path=run_path,
                 processed_path=output_path,
-                model_name=run.name,
+                run_name=run.name,
                 seed=seed,
                 stdout=stdout,
                 stderr=stderr,
