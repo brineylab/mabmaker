@@ -45,7 +45,7 @@ def process_boltz_output(
     msas_path = _get_msas_path(processed_path)
     logs_path = _get_logs_path(processed_path)
 
-    # copy models
+    # copy predictions
     for model_path in glob.glob(
         os.path.join(original_path, "predictions", "*", "*_model_*.cif")
     ):
@@ -115,7 +115,7 @@ def process_boltz_output(
             os.path.join(msas_path, seed, "paired", os.path.basename(msa_path)),
         )
 
-    # write logs
+    # write/copy logs
     abutils.io.make_dir(os.path.join(logs_path, seed))
     if stdout is not None:
         with open(os.path.join(logs_path, seed, "stdout.log"), "w") as f:
