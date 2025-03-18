@@ -12,6 +12,7 @@ from tqdm.auto import tqdm
 
 from ..utils.inputs import StructurePredictionRun, setup_structure_prediction_run
 from ..utils.jobs import get_gpu_queue, gpu_worker
+from ..utils.outputs import process_boltz_output
 
 
 def boltz(
@@ -27,8 +28,8 @@ def boltz(
     output_format: str = "mmcif",
     override: bool = False,
     msa_pairing_strategy: str = "greedy",
-    write_full_pae: bool = False,
-    write_full_pde: bool = False,
+    write_full_pae: bool = True,
+    write_full_pde: bool = True,
     cache: str = "~/.boltz",
 ) -> None:
     """
@@ -104,13 +105,15 @@ def boltz(
 
     # run predictions
     futures = []
+    output_paths = []
     with cf.ThreadPoolExecutor(max_workers=num_gpus) as executor:
         for run in runs:
             # Boltz accepts a single seed, so we need a separate job for each seed
             for seed in run.seeds:
+                _output_path = os.path.join(output_path, "tmp", f"seed_{seed}")
                 cmd = _build_boltz_command(
                     run=run,
-                    output_path=output_path,
+                    output_path=_output_path,
                     use_msa_server=use_msa_server,
                     msa_server_url=msa_server_url,
                     seed=seed,
@@ -126,6 +129,7 @@ def boltz(
                     cache=cache,
                 )
             futures.append(executor.submit(gpu_worker, cmd, gpu_queue))
+            output_paths.append(_output_path)
 
         # monitor progress
         with tqdm(
@@ -137,13 +141,22 @@ def boltz(
                 pbar.update(1)
 
     # write prediction logs (stdout and stderr)
-    abutils.io.make_dir(os.path.join(output_path, run.name))
-    for run, future in zip(runs, futures):
-        result = future.result()
-        with open(os.path.join(output_path, run.name, "stdout.log"), "w") as f:
-            f.write(result.stdout.decode("utf-8"))
-        with open(os.path.join(output_path, run.name, "stderr.log"), "w") as f:
-            f.write(result.stderr.decode("utf-8"))
+    run_idx = 0
+    for run in runs:
+        for seed in run.seeds:
+            run_path = output_paths[run_idx]
+            result = futures[run_idx].result()
+            stdout = result.stdout.decode("utf-8")
+            stderr = result.stderr.decode("utf-8")
+            process_boltz_output(
+                original_path=run_path,
+                processed_path=output_path,
+                model_name=run.name,
+                seed=seed,
+                stdout=stdout,
+                stderr=stderr,
+            )
+            run_idx += 1
 
 
 def _build_boltz_command(
