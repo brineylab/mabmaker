@@ -16,6 +16,8 @@ from ..utils.inputs import setup_structure_prediction_run
 from ..utils.jobs import get_gpu_queue, gpu_worker
 from ..utils.outputs import process_chai_output
 
+__all__ = ["chai"]
+
 
 def chai(
     json_path: str,

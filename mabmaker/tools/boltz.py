@@ -14,6 +14,8 @@ from ..utils.inputs import StructurePredictionRun, setup_structure_prediction_ru
 from ..utils.jobs import get_gpu_queue, gpu_worker
 from ..utils.outputs import process_boltz_output
 
+__all__ = ["boltz"]
+
 
 def boltz(
     json_path: str,
