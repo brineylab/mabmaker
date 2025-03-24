@@ -17,3 +17,7 @@ include mabmaker/models/LigandMPNN/openfold/np/relax/*
 include mabmaker/models/LigandMPNN/openfold/resources/*
 include mabmaker/models/LigandMPNN/openfold/utils/*
 include mabmaker/models/LigandMPNN/training/*
+
+include mabmaker/models/Protenix/*
+include mabmaker/models/Protenix/configs/*
+include mabmaker/models/Protenix/runner/*
