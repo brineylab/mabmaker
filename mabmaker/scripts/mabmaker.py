@@ -173,6 +173,9 @@ def ligandmpnn(
     verbose: bool = True,
     debug: bool = False,
 ) -> None:
+    """
+    Structure-based sequence design with LigandMPNN.
+    """
     run_ligandmpnn(
         pdb_path=pdb_path,
         output_dir=output_dir,
@@ -230,6 +233,9 @@ def protenix(
     gpus: int | Iterable[int] | None = None,
     use_msa_server: bool = True,
 ) -> None:
+    """
+    Structure prediction with Protenix.
+    """
     run_protenix(
         json_path=json_path,
         output_path=output_path,
