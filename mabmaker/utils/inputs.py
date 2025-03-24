@@ -57,6 +57,9 @@ def setup_structure_prediction_run(
 #
 # =============================================
 
+# TODO: rewrite to accept either alphafoldserver or alphafold3 input dialects
+# differences betwee the two can be found at: https://github.com/google-deepmind/alphafold3/blob/main/docs/input.md
+
 
 class StructurePredictionRun(
     ChaiFormattingMixin, BoltzFormattingMixin, ProtenixFormattingMixin
