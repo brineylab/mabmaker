@@ -110,9 +110,10 @@ def boltz(
     output_paths = []
     with cf.ThreadPoolExecutor(max_workers=num_gpus) as executor:
         for run in runs:
+            run_output_path = os.path.join(output_path, run.name, "raw_output")
             # Boltz accepts a single seed, so we need a separate job for each seed
             for seed in run.seeds:
-                _output_path = os.path.join(output_path, "raw_output", f"seed_{seed}")
+                _output_path = os.path.join(run_output_path, f"seed_{seed}")
                 cmd = _build_boltz_command(
                     run=run,
                     output_path=_output_path,
@@ -152,7 +153,7 @@ def boltz(
             stderr = result.stderr.decode("utf-8")
             process_boltz_output(
                 original_path=run_path,
-                processed_path=output_path,
+                processed_path=os.path.join(output_path, run.name),
                 run_name=run.name,
                 seed=seed,
                 stdout=stdout,
