@@ -33,7 +33,8 @@ def run_mmseqs2(
     use_pairing: bool = False,
     pairing_strategy: str = "greedy",
     host_url: str = "https://api.colabfold.com",
-    user_agent: str = "",
+    user_agent: str = "mabmaker/0.1.0 briney@scripps.edu",
+    quiet: bool = False,
 ) -> Tuple[List[str], List[str]]:
     """
     Run `MMseqs2`_ to generate multiple sequence alignments using the `ColabFold`_ API.
@@ -69,6 +70,9 @@ def run_mmseqs2(
 
     user_agent : str, optional
         The user agent to use. Default is an empty string.
+
+    quiet : bool, optional
+        Whether to suppress progress bar. Default is False.
 
     Returns
     -------
@@ -225,7 +229,9 @@ def run_mmseqs2(
     # lets do it!
     if not os.path.isfile(tar_gz_file):
         TIME_ESTIMATE = 150 * len(seqs_unique)
-        with tqdm(total=TIME_ESTIMATE, bar_format=TQDM_BAR_FORMAT) as pbar:
+        with tqdm(
+            total=TIME_ESTIMATE, bar_format=TQDM_BAR_FORMAT, disable=quiet
+        ) as pbar:
             while REDO:
                 pbar.set_description("SUBMIT")
 
