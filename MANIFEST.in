@@ -2,18 +2,18 @@ include README.md
 include LICENSE
 include requirements*
 
-include antibodydesign/scripts/*
-include antibodydesign/tools/*
+include mabmaker/scripts/*
+include mabmaker/tools/*
 
-include antibodydesign/models/*
-include antibodydesign/models/LigandMPNN/*
-include antibodydesign/models/LigandMPNN/inputs/*
-include antibodydesign/models/LigandMPNN/model_params/*
-include antibodydesign/models/LigandMPNN/openfold/*
-include antibodydesign/models/LigandMPNN/openfold/data/*
-include antibodydesign/models/LigandMPNN/openfold/data/tools/*
-include antibodydesign/models/LigandMPNN/openfold/np/*
-include antibodydesign/models/LigandMPNN/openfold/np/relax/*
-include antibodydesign/models/LigandMPNN/openfold/resources/*
-include antibodydesign/models/LigandMPNN/openfold/utils/*
-include antibodydesign/models/LigandMPNN/training/*
+include mabmaker/models/*
+include mabmaker/models/LigandMPNN/*
+include mabmaker/models/LigandMPNN/inputs/*
+include mabmaker/models/LigandMPNN/model_params/*
+include mabmaker/models/LigandMPNN/openfold/*
+include mabmaker/models/LigandMPNN/openfold/data/*
+include mabmaker/models/LigandMPNN/openfold/data/tools/*
+include mabmaker/models/LigandMPNN/openfold/np/*
+include mabmaker/models/LigandMPNN/openfold/np/relax/*
+include mabmaker/models/LigandMPNN/openfold/resources/*
+include mabmaker/models/LigandMPNN/openfold/utils/*
+include mabmaker/models/LigandMPNN/training/*
