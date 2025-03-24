@@ -264,7 +264,7 @@ def protenix(
     help="GPU(s) to use, for example '0' or '0,1'. If not provided, all available GPUs will be used.",
 )
 @click.option(
-    "--use_msa_server/--use_esm_embeddings",
+    "--use_msa_server/--no_use_msa_server",
     default=True,
     help="Use the MSA server to get the MSA.",
 )
@@ -385,8 +385,7 @@ def chai(
     help="GPU(s) to use, for example '0' or '0,1'. If not provided, all available GPUs will be used.",
 )
 @click.option(
-    "--use_msa_server",
-    is_flag=True,
+    "--use_msa_server/--no_use_msa_server",
     default=True,
     help="Whether to use the MSA server.",
 )
@@ -439,14 +438,12 @@ def chai(
     help="The MSA pairing strategy. Used only if use_msa_server is True. Options are 'greedy' and 'complete'.",
 )
 @click.option(
-    "--write_full_pae",
-    is_flag=True,
+    "--write_full_pae/--no_write_full_pae",
     default=True,
     help="Whether to write the full predicted aligned error (PAE) matrix as a file.",
 )
 @click.option(
-    "--write_full_pde",
-    is_flag=True,
+    "--write_full_pde/--no_write_full_pde",
     default=True,
     help="Whether to write the full predicted docking error (PDE) matrix as a file.",
 )
