@@ -30,10 +30,10 @@ setup(
     version=__version__,
     author="Bryan Briney",
     author_email="briney@scripps.edu",
-    description="Antibody design.",
+    description="mAb maker: in silico antibody design.",
     long_description=long_description,
     long_description_content_type="text/markdown",
-    url="https://github.com/brineylab/antibodydesign",
+    url="https://github.com/brineylab/mabmaker",
     packages=find_packages(),
     include_package_data=True,
     entry_points={
