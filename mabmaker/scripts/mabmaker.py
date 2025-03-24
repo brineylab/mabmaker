@@ -6,6 +6,8 @@ from typing import Iterable, Optional, Union
 
 import click
 
+from ..tools.boltz import boltz as run_boltz
+from ..tools.chai import chai as run_chai
 from ..tools.ligandmpnn import ligandmpnn as run_ligandmpnn
 from ..tools.protenix import protenix as run_protenix
 
@@ -233,4 +235,255 @@ def protenix(
         output_path=output_path,
         gpus=gpus,
         use_msa_server=use_msa_server,
+    )
+
+
+@cli.command()
+@click.argument(
+    "json_path",
+    type=str,
+    required=True,
+    # help="Path to the input JSON file or a directory of JSON files.",
+)
+@click.argument(
+    "output_path",
+    type=str,
+    required=True,
+    # help="Path to the output directory. It will be created if it does not exist.",
+)
+@click.option(
+    "--gpus",
+    type=str,
+    default=None,
+    help="GPU(s) to use, for example '0' or '0,1'. If not provided, all available GPUs will be used.",
+)
+@click.option(
+    "--use_msa_server/--use_esm_embeddings",
+    default=True,
+    help="Use the MSA server to get the MSA.",
+)
+@click.option(
+    "--msa_server_url",
+    type=str,
+    default="https://api.colabfold.com",
+    help="The URL of the MSA server.",
+)
+@click.option(
+    "--recycle_msa_subsample",
+    type=int,
+    default=0,
+    help="Whether to subsample the MSA for each trunk recycle. If 0, no subsampling will be performed. If >0, the MSA will be subsampled.",
+)
+@click.option(
+    "--use_templates_server",
+    is_flag=True,
+    default=False,
+    help="Whether to use the templates server.",
+)
+@click.option(
+    "--template_hits_path",
+    type=str,
+    default=None,
+    help="The path to the template hits file.",
+)
+@click.option(
+    "--msa_directory",
+    type=str,
+    default=None,
+    help="The path to the directory containing the MSAs.",
+)
+@click.option(
+    "--num_trunk_recycles",
+    type=int,
+    default=3,
+    help="The number of trunk recycles to perform.",
+)
+@click.option(
+    "--num_trunk_samples",
+    type=int,
+    default=1,
+    help="The number of trunk samples to generate.",
+)
+@click.option(
+    "--num_diffusion_timesteps",
+    type=int,
+    default=200,
+    help="The number of diffusion timesteps to use.",
+)
+@click.option(
+    "--num_diffusion_samples",
+    type=int,
+    default=5,
+    help="The number of diffusion samples to generate.",
+)
+@click.option(
+    "--low_memory",
+    is_flag=True,
+    default=False,
+    help="Whether to use low memory mode.",
+)
+def chai(
+    json_path: str,
+    output_path: str,
+    gpus: int | Iterable[int] | None = None,
+    use_msa_server: bool = True,
+    msa_server_url: str = "https://api.colabfold.com",
+    recycle_msa_subsample: int = 0,
+    use_templates_server: bool = False,
+    template_hits_path: Optional[str] = None,
+    msa_directory: Optional[str] = None,
+    num_trunk_recycles: int = 3,
+    num_trunk_samples: int = 1,
+    num_diffusion_timesteps: int = 200,
+    num_diffusion_samples: int = 5,
+    low_memory: bool = False,
+) -> None:
+    """
+    Structure prediction with Chai-1.
+    """
+    run_chai(
+        json_path=json_path,
+        output_path=output_path,
+        gpus=gpus,
+        use_msa_server=use_msa_server,
+        msa_server_url=msa_server_url,
+        recycle_msa_subsample=recycle_msa_subsample,
+        use_templates_server=use_templates_server,
+        template_hits_path=template_hits_path,
+        msa_directory=msa_directory,
+        num_trunk_recycles=num_trunk_recycles,
+        num_trunk_samples=num_trunk_samples,
+        num_diffusion_timesteps=num_diffusion_timesteps,
+        num_diffusion_samples=num_diffusion_samples,
+        low_memory=low_memory,
+    )
+
+
+@cli.command()
+@click.argument(
+    "json_path",
+    type=str,
+    required=True,
+    # help="Path to the input JSON file or a directory of JSON files.",
+)
+@click.argument(
+    "output_path",
+    type=str,
+    required=True,
+    # help="Path to the output directory. It will be created if it does not exist.",
+)
+@click.option(
+    "--gpus",
+    type=str,
+    default=None,
+    help="GPU(s) to use, for example '0' or '0,1'. If not provided, all available GPUs will be used.",
+)
+@click.option(
+    "--use_msa_server",
+    is_flag=True,
+    default=True,
+    help="Whether to use the MSA server.",
+)
+@click.option(
+    "--msa_server_url",
+    type=str,
+    default="https://api.colabfold.com",
+    help="The URL of the MSA server.",
+)
+@click.option(
+    "--recycling_steps",
+    type=int,
+    default=3,
+    help="The number of recycling steps.",
+)
+@click.option(
+    "--sampling_steps",
+    type=int,
+    default=200,
+    help="The number of sampling steps.",
+)
+@click.option(
+    "--diffusion_samples",
+    type=int,
+    default=5,
+    help="The number of diffusion samples.",
+)
+@click.option(
+    "--step_scale",
+    type=float,
+    default=1.638,
+    help="The step scale. The step size is related to the temperature at which the diffusion process samples the distribution. The lower the step_scale, the higher the diversity among samples (recommended between 1 and 2).",
+)
+@click.option(
+    "--output_format",
+    type=str,
+    default="mmcif",
+    help="The output format. Options are 'mmcif' and 'pdb'.",
+)
+@click.option(
+    "--override",
+    is_flag=True,
+    default=False,
+    help="Whether to override existing output files if found.",
+)
+@click.option(
+    "--msa_pairing_strategy",
+    type=str,
+    default="greedy",
+    help="The MSA pairing strategy. Used only if use_msa_server is True. Options are 'greedy' and 'complete'.",
+)
+@click.option(
+    "--write_full_pae",
+    is_flag=True,
+    default=True,
+    help="Whether to write the full predicted aligned error (PAE) matrix as a file.",
+)
+@click.option(
+    "--write_full_pde",
+    is_flag=True,
+    default=True,
+    help="Whether to write the full predicted docking error (PDE) matrix as a file.",
+)
+@click.option(
+    "--cache",
+    type=str,
+    default="~/.boltz",
+    help="The path to the cache directory, which contains model weights and other resources.",
+)
+def boltz(
+    json_path: str,
+    output_path: str,
+    gpus: int | Iterable[int] | None = None,
+    use_msa_server: bool = True,
+    msa_server_url: str = "https://api.colabfold.com",
+    recycling_steps: int = 3,
+    sampling_steps: int = 200,
+    diffusion_samples: int = 5,
+    step_scale: float = 1.638,
+    output_format: str = "mmcif",
+    override: bool = False,
+    msa_pairing_strategy: str = "greedy",
+    write_full_pae: bool = True,
+    write_full_pde: bool = True,
+    cache: str = "~/.boltz",
+) -> None:
+    """
+    Structure prediction with Boltz-1.
+    """
+    run_boltz(
+        json_path=json_path,
+        output_path=output_path,
+        gpus=gpus,
+        use_msa_server=use_msa_server,
+        msa_server_url=msa_server_url,
+        recycling_steps=recycling_steps,
+        sampling_steps=sampling_steps,
+        diffusion_samples=diffusion_samples,
+        step_scale=step_scale,
+        output_format=output_format,
+        override=override,
+        msa_pairing_strategy=msa_pairing_strategy,
+        write_full_pae=write_full_pae,
+        write_full_pde=write_full_pde,
+        cache=cache,
     )
