@@ -5,6 +5,7 @@
 import concurrent.futures
 import json
 import os
+import re
 import shutil
 
 # import subprocess as sp
@@ -20,7 +21,7 @@ from tqdm.auto import tqdm
 
 from ..utils.jobs import get_gpu_queue, gpu_worker
 
-__all__ = ["ligandmpnn"]
+__all__ = ["ligandmpnn", "expand_residue_ranges"]
 
 LIGAND_MPNN_DIR = os.path.abspath(
     os.path.join(os.path.dirname(os.path.dirname(__file__)), "models", "LigandMPNN")
@@ -195,17 +196,17 @@ def ligandmpnn(
 
     fixed_residues : Union[str, Dict[str, str], None], optional, default=None
         Fix residues at the provided positions (redesign all other residues). Can be provided as:
-            - a string of space-separated residue IDs: ``"A12 A13 A14 B2 B25"``
+            - a string of space- or comma-separated residue IDs: ``"A12-14 B2 B25"`` or ``"A12-14,B2,B25"``
             - a list or tuple of residue IDs: ``["A12", "A13", "A14", "B2", "B25"]``
-            - a file path to a text file containing space-separated residue IDs: ``"A12 A13 A14 B2 B25"``
-            - a file path to a JSON file containing a dictionary mapping PDB file names (not the full path) to space-separated residue IDs: ``{"a1b2.pdb": "A12 A13 A14 B2 B25"}``
+            - a file path to a text file containing space- or comma-separated residue IDs: ``"A12-14 B2 B25"`` or ``"A12-14,B2,B25"``
+            - a file path to a JSON file containing a dictionary mapping PDB file names (not the full path) to space- or comma-separated residue IDs: ``{"a1b2.pdb": "A12-14 B2 B25"}``
 
     redesigned_residues : Union[str, Iterable, None], optional, default=None
         Residues to redesign (all other residues will be fixed). Can be provided as:
-          - a string of space-separated residue IDs: ``"A12 A13 A14 B2 B25"``
+          - a string of space- or comma-separated residue IDs: ``"A12-14 B2 B25"`` or ``"A12-14,B2,B25"``
           - a list or tuple of residue IDs: ``["A12", "A13", "A14", "B2", "B25"]``
-          - a file path to a text file containing space-separated residue IDs: ``"A12 A13 A14 B2 B25"``
-          - a file path to a JSON file containing a dictionary mapping PDB file names (not the full path) to space-separated residue IDs: ``{"a1b2.pdb": "A12 A13 A14 B2 B25"}``
+          - a file path to a text file containing space- or comma-separated residue IDs: ``"A12-14 B2 B25"`` or ``"A12-14,B2,B25"``
+          - a file path to a JSON file containing a dictionary mapping PDB file names (not the full path) to space- or comma-separated residue IDs: ``{"a1b2.pdb": "A12-14 B2 B25"}``
 
     chains_to_design : Union[str, Iterable, None], optional, default=None
         Chains to design. Can be provided as:
@@ -222,7 +223,7 @@ def ligandmpnn(
             - a file path to a JSON file containing a dictionary mapping PDB file names (not the full path) to comma-separated chain IDs: ``{"a1b2.pdb": "A,B,C"}``
 
     use_side_chain_context : bool, optional, default=True
-        Whether to use side chain context.
+        Whether to use side chain context. Only used if `model_type` is ``"ligand_mpnn"``.
 
     use_atom_context : bool, optional, default=False
         Whether to use atom context. Only used if `model_type` is ``"ligand_mpnn"``.
@@ -390,9 +391,14 @@ def ligandmpnn(
     fixed_residues_dict = _process_chain_or_residue_data(
         fixed_residues, pdbs=pdb_names, sep=" "
     )
+    for k, v in fixed_residues_dict.items():  # expand residue ranges
+        fixed_residues_dict[k] = expand_residue_ranges(v)
+
     redesigned_residues_dict = _process_chain_or_residue_data(
         redesigned_residues, pdbs=pdb_names, sep=" "
     )
+    for k, v in redesigned_residues_dict.items():  # expand residue ranges
+        redesigned_residues_dict[k] = expand_residue_ranges(v)
 
     # bias AA
     if isinstance(bias_aa, dict):
@@ -492,6 +498,131 @@ def ligandmpnn(
         ) as pbar:
             for _ in concurrent.futures.as_completed(futures):
                 pbar.update(1)
+
+
+def expand_residue_ranges(
+    input_source: str, output_file: Optional[str] = None
+) -> Optional[str]:
+    """
+    Expand residue ranges into individual residue identifiers.
+
+    Parameters
+    ----------
+    input_source : str
+        Either a path to a file containing residue ranges or a string containing the ranges.
+
+    output_file : str, optional
+        Path to write the expanded residues. If ``None``, returns the expanded residues as a string.
+
+    Returns
+    -------
+    str or None
+        If `output_file` is ``None``, returns the expanded residues as a space-separated string.
+        Otherwise, writes to the file and returns ``None``.
+
+    Example
+    -------
+    Input: "A1-A5,B10,C15-C20" or "A1-5 B10 C15-20"
+    Returns: "A1 A2 A3 A4 A5 B10 C15 C16 C17 C18 C19 C20"
+
+    """
+    # determine whether input_source is a file path or a string containing residue ranges
+    if os.path.isfile(input_source):
+        try:
+            with open(input_source, "r") as f:
+                input_str = f.read().strip()
+        except FileNotFoundError:
+            print(f"Error: Input file '{input_source}' not found.")
+            return None
+    else:
+        input_str = input_source.strip()
+
+    output = []
+    # split the input string by commas or whitespace
+    items = re.split(r"[,\s]+", input_str)
+
+    # iterate over each item
+    for item in items:
+        item = item.strip()
+        if not item:  # skip empty items
+            continue
+
+        # check if it's a range (contains '-')
+        if "-" in item:
+            parts = item.split("-")
+            if len(parts) != 2:
+                print(f"Warning: Invalid range format '{item}'. Skipping.")
+                continue
+
+            start_part, end_part = parts
+
+            # extract chain from the start part
+            chain_match = re.match(r"^([A-Z])", start_part)
+            if not chain_match:
+                print(
+                    f"Warning: No chain identifier found in '{start_part}'. Skipping."
+                )
+                continue
+
+            chain = chain_match.group(1)
+
+            # extract start position
+            start_num_match = re.search(r"(\d+)", start_part)
+            if not start_num_match:
+                print(f"Warning: No residue number found in '{start_part}'. Skipping.")
+                continue
+
+            start_num = int(start_num_match.group(1))
+
+            # extract end position, handling both "A1-A10" and "A1-10" formats
+            # check if the end part starts with a chain identifier
+            end_chain_match = re.match(r"^([A-Z])", end_part)
+
+            if end_chain_match:
+                # format "A1-A10" - extract only the number
+                end_num_match = re.search(r"(\d+)", end_part)
+                if not end_num_match:
+                    print(
+                        f"Warning: No residue number found in '{end_part}'. Skipping."
+                    )
+                    continue
+                end_num = int(end_num_match.group(1))
+            else:
+                # format "A1-10" - the end part is just the number
+                try:
+                    end_num = int(end_part)
+                except ValueError:
+                    print(f"Warning: Invalid end number '{end_part}'. Skipping.")
+                    continue
+
+            # generate the sequence and append to output
+            for i in range(start_num, end_num + 1):
+                output.append(f"{chain}{i}")
+        else:
+            # single residue case
+            if re.match(
+                r"^[A-Z]\d+$", item
+            ):  # ensure it has a valid format like A1, B22
+                output.append(item)
+            else:
+                print(f"Warning: Invalid residue format '{item}'. Skipping.")
+                continue
+
+    # join the output with spaces
+    expanded_residues = " ".join(output)
+
+    # write or return
+    if output_file:
+        try:
+            with open(output_file, "w") as f:
+                f.write(expanded_residues)
+            # print(f"Expanded residues written to {output_file}")
+            return None
+        except Exception as e:
+            print(f"Error writing to output file: {e}")
+            return expanded_residues
+    else:
+        return expanded_residues
 
 
 def log_params(params: LigandMPNNParameters) -> None:
