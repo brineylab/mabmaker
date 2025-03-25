@@ -245,7 +245,6 @@ def process_protenix_output(
     original_path: str,
     processed_path: str,
     run_name: str,
-    # seed: int | str,
     stdout: str | None = None,
     stderr: str | None = None,
 ) -> None:
@@ -314,12 +313,12 @@ def process_protenix_output(
         )
 
     # write logs
-    abutils.io.make_dir(os.path.join(logs_path, seed))
+    abutils.io.make_dir(os.path.join(logs_path))
     if stdout is not None:
-        with open(os.path.join(logs_path, seed, "stdout.log"), "w") as f:
+        with open(os.path.join(logs_path, "stdout.log"), "w") as f:
             f.write(stdout)
     if stderr is not None:
-        with open(os.path.join(logs_path, seed, "stderr.log"), "w") as f:
+        with open(os.path.join(logs_path, "stderr.log"), "w") as f:
             f.write(stderr)
 
 
