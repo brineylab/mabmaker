@@ -131,8 +131,8 @@ def boltz(
                     write_full_pde=write_full_pde,
                     cache=cache,
                 )
-            futures.append(executor.submit(gpu_worker, cmd, gpu_queue))
-            output_paths.append(_output_path)
+                futures.append(executor.submit(gpu_worker, cmd, gpu_queue))
+                output_paths.append(_output_path)
 
         # monitor progress
         with tqdm(
