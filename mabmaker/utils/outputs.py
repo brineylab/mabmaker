@@ -286,11 +286,11 @@ def process_protenix_output(
     predictions_path = _get_predictions_path(processed_path)
     metrics_path = _get_metrics_path(processed_path)
     logs_path = _get_logs_path(processed_path)
-    # msas_path = _get_msas_path(processed_path)
+    msas_path = _get_msas_path(processed_path)
 
     # copy predictions
     for model_path in glob.glob(
-        os.path.join(original_path, "*", "*", "*_sample_*.cif")
+        os.path.join(original_path, "*", "*", "predictions", "*_sample_*.cif")
     ):
         model_num = os.path.basename(model_path).split("_")[-1].split(".")[0]
         seed = os.path.basename(model_path).split("_")[-2]
@@ -301,7 +301,9 @@ def process_protenix_output(
 
     # copy metrics -- confidence
     for confidence_path in glob.glob(
-        os.path.join(original_path, "*", "*", "*_summary_confidence_*.json")
+        os.path.join(
+            original_path, "*", "*", "predictions", "*_summary_confidence_*.json"
+        )
     ):
         model_num = os.path.basename(confidence_path).split("_")[-1].split(".")[0]
         seed = os.path.basename(confidence_path).split("_")[-5]
@@ -311,6 +313,15 @@ def process_protenix_output(
                 metrics_path, "confidence", f"{seed}|{model_num}|{run_name}.json"
             ),
         )
+
+    # copy msas
+    for msa_path in glob.glob(os.path.join(original_path, "*", "msa_resmsa_*")):
+        if os.path.isdir(msa_path):
+            shutil.copytree(
+                msa_path,
+                os.path.join(msas_path),
+                dirs_exist_ok=True,
+            )
 
     # write logs
     abutils.io.make_dir(os.path.join(logs_path))
