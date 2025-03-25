@@ -12,6 +12,13 @@ from tqdm.auto import tqdm
 
 from ..utils.inputs import StructurePredictionRun, setup_structure_prediction_run
 from ..utils.jobs import get_gpu_queue, gpu_worker
+from ..utils.outputs import process_protenix_output
+
+PROTENIX_DIR = os.path.abspath(
+    os.path.join(os.path.dirname(os.path.dirname(__file__)), "models", "Protenix")
+)
+
+__all__ = ["protenix"]
 
 
 def protenix(
@@ -19,6 +26,10 @@ def protenix(
     output_path: str,
     gpus: int | Iterable[int] | None = None,
     use_msa_server: bool = True,
+    num_trunk_recycles: int = 3,
+    num_trunk_samples: int = 1,
+    num_diffusion_timesteps: int = 200,
+    num_diffusion_samples: int = 5,
 ) -> None:
     """
     Structure prediction with `Protenix`_.
@@ -65,14 +76,17 @@ def protenix(
 
     # run predictions
     futures = []
+    output_paths = []
     with cf.ThreadPoolExecutor(max_workers=num_gpus) as executor:
         for run in runs:
+            run_output_path = os.path.join(output_path, run.name, "raw_output")
             cmd = _build_protenix_command(
                 run=run,
-                output_path=output_path,
+                output_path=run_output_path,
                 use_msa_server=use_msa_server,
             )
             futures.append(executor.submit(gpu_worker, cmd, gpu_queue))
+            output_paths.append(run_output_path)
 
         # monitor progress
         with tqdm(
@@ -85,12 +99,14 @@ def protenix(
 
     # write prediction logs (stdout and stderr)
     abutils.io.make_dir(os.path.join(output_path, run.name))
-    for run, future in zip(runs, futures):
+    for run, run_path, future in zip(runs, output_paths, futures):
         result = future.result()
-        with open(os.path.join(output_path, run.name, "stdout.log"), "w") as f:
-            f.write(result.stdout.decode("utf-8"))
-        with open(os.path.join(output_path, run.name, "stderr.log"), "w") as f:
-            f.write(result.stderr.decode("utf-8"))
+        process_protenix_output(
+            result=result,
+            original_path=run_path,
+            processed_path=os.path.join(output_path, run.name),
+            run_name=run.name,
+        )
 
 
 def _build_protenix_command(

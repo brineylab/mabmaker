@@ -40,6 +40,27 @@ def process_boltz_output(
                 ...
     └── processed/                                                 # Processed data used during execution
 
+
+    Parameters
+    ----------
+    original_path : str
+        The path to the original output directory.
+
+    processed_path : str
+        The path to the processed output directory.
+
+    run_name : str
+        The name of the run.
+
+    seed : int | str
+        The seed number.
+
+    stdout : str | None, optional
+        The stdout of the run.
+
+    stderr : str | None, optional
+        The stderr of the run.
+
     """
     _build_output_directory_structure(processed_path)
     predictions_path = _get_predictions_path(processed_path)
@@ -145,6 +166,24 @@ def process_chai_output(
     are written as outputs by the model, but the remaining metrics are not. We'll extract
     them from the `StructureCandidates` object. Also, since the Chai-1 inference function
     is called directly, we don't have any stdout or stderr to write.
+
+    Parameters
+    ----------
+    result : StructureCandidates
+        The result object from the Chai-1 inference.
+
+    original_path : str
+        The path to the original output directory.
+
+    processed_path : str
+        The path to the processed output directory.
+
+    run_name : str
+        The name of the run.
+
+    seed : int | str
+        The random seed used for the run.
+
     """
     _build_output_directory_structure(processed_path)
     predictions_path = _get_predictions_path(processed_path)
@@ -202,18 +241,79 @@ def process_chai_output(
     )
 
 
-"""
-PROTENIX PREDICTION OUTPUT:
+def process_protenix_output(
+    original_path: str,
+    processed_path: str,
+    run_name: str,
+    seed: int | str,
+    stdout: str | None = None,
+    stderr: str | None = None,
+) -> None:
+    """
+    Process the outputs of a Protenix prediction. We'd like to restructure the output files
+    into a standardized layout. The output path of each run (for Protenix, we need to do
+    a separate run for each seed) is expected to be of the form:
 
-├── <name>/  # specified in the input JSON file
-│   ├── <seed>/  # specified via the `--seeds` flag in the inference script
-│   │   ├── <name>_<seed>_sample_0.cif
-│   │   ├── <name>_<seed>_summary_confidence_sample_0.json
-│   │   └──... # the number of samples in each seed is specified via `--sample_diffusion.N_sample ` flag in the inference script
-│   └──...
-└── ...
+    PROTENIX PREDICTION OUTPUT:
 
-"""
+    ├── <name>/  # specified in the input JSON file
+    │   ├── <seed>/  # specified via the `--seeds` flag in the inference script
+    │   │   ├── <name>_<seed>_sample_0.cif
+    │   │   ├── <name>_<seed>_summary_confidence_sample_0.json
+    │   │   └──... # the number of samples in each seed is specified via `--sample_diffusion.N_sample ` flag in the inference script
+    │   └──...
+    └── ...
+
+
+    Parameters
+    ----------
+    original_path : str
+        The path to the original output directory.
+
+    processed_path : str
+        The path to the processed output directory.
+
+    run_name : str
+        The name of the run.
+
+    seed : int | str
+        The random seed used for the run.
+
+    stdout : str | None, optional
+        The stdout of the run.
+
+    stderr : str | None, optional
+        The stderr of the run.
+
+    """
+    _build_output_directory_structure(processed_path)
+    predictions_path = _get_predictions_path(processed_path)
+    metrics_path = _get_metrics_path(processed_path)
+    # msas_path = _get_msas_path(processed_path)
+
+    # copy predictions
+    for model_path in glob.glob(
+        os.path.join(original_path, "*", "*", "*_sample_*.cif")
+    ):
+        model_num = os.path.basename(model_path).split("_")[-1].split(".")[0]
+        seed = os.path.basename(model_path).split("_")[-2]
+        shutil.copy(
+            model_path,
+            os.path.join(predictions_path, f"{seed}|{model_num}|{run_name}.cif"),
+        )
+
+    # copy metrics -- confidence
+    for confidence_path in glob.glob(
+        os.path.join(original_path, "*", "*", "*_summary_confidence_*.json")
+    ):
+        model_num = os.path.basename(confidence_path).split("_")[-1].split(".")[0]
+        seed = os.path.basename(confidence_path).split("_")[-5]
+        shutil.copy(
+            confidence_path,
+            os.path.join(
+                metrics_path, "confidence", f"{seed}|{model_num}|{run_name}.json"
+            ),
+        )
 
 
 def _build_output_directory_structure(base_path: str) -> None:
