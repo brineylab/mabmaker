@@ -293,7 +293,7 @@ def process_protenix_output(
         os.path.join(original_path, "*", "*", "predictions", "*_sample_*.cif")
     ):
         model_num = os.path.basename(model_path).split("_")[-1].split(".")[0]
-        seed = os.path.basename(model_path).split("_")[-2]
+        seed = os.path.basename(model_path).split("_")[-3]
         shutil.copy(
             model_path,
             os.path.join(predictions_path, f"{seed}|{model_num}|{run_name}.cif"),
