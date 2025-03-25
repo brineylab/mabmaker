@@ -101,11 +101,14 @@ def protenix(
     abutils.io.make_dir(os.path.join(output_path, run.name))
     for run, run_path, future in zip(runs, output_paths, futures):
         result = future.result()
+        stdout = result.stdout.decode("utf-8")
+        stderr = result.stderr.decode("utf-8")
         process_protenix_output(
-            result=result,
             original_path=run_path,
             processed_path=os.path.join(output_path, run.name),
             run_name=run.name,
+            stdout=stdout,
+            stderr=stderr,
         )
 
 

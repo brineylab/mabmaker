@@ -245,7 +245,7 @@ def process_protenix_output(
     original_path: str,
     processed_path: str,
     run_name: str,
-    seed: int | str,
+    # seed: int | str,
     stdout: str | None = None,
     stderr: str | None = None,
 ) -> None:
@@ -276,9 +276,6 @@ def process_protenix_output(
     run_name : str
         The name of the run.
 
-    seed : int | str
-        The random seed used for the run.
-
     stdout : str | None, optional
         The stdout of the run.
 
@@ -289,6 +286,7 @@ def process_protenix_output(
     _build_output_directory_structure(processed_path)
     predictions_path = _get_predictions_path(processed_path)
     metrics_path = _get_metrics_path(processed_path)
+    logs_path = _get_logs_path(processed_path)
     # msas_path = _get_msas_path(processed_path)
 
     # copy predictions
@@ -314,6 +312,15 @@ def process_protenix_output(
                 metrics_path, "confidence", f"{seed}|{model_num}|{run_name}.json"
             ),
         )
+
+    # write logs
+    abutils.io.make_dir(os.path.join(logs_path, seed))
+    if stdout is not None:
+        with open(os.path.join(logs_path, seed, "stdout.log"), "w") as f:
+            f.write(stdout)
+    if stderr is not None:
+        with open(os.path.join(logs_path, seed, "stderr.log"), "w") as f:
+            f.write(stderr)
 
 
 def _build_output_directory_structure(base_path: str) -> None:
