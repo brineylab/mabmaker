@@ -111,7 +111,7 @@ def ligandmpnn(
     chains_to_design: Union[str, Iterable, None] = None,
     parse_these_chains_only: Union[str, Iterable, None] = None,
     use_side_chain_context: bool = True,
-    use_atom_context: bool = False,
+    use_atom_context: bool = True,
     batch_size: int = 32,
     num_batches: int = 1,
     save_stats: bool = True,
