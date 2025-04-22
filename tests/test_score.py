@@ -13,7 +13,16 @@ from Bio.PDB.Model import Model
 from Bio.PDB.Residue import Residue
 from Bio.PDB.Structure import Structure
 
-from mabmaker.tools.score import fnat, identify_contacts, mean_fnat, rmsd, ssRMSD
+from mabmaker.tools.score import (
+    fnat,
+    identify_contacts,
+    identify_interface_residues,
+    iRMSD,
+    mean_fnat,
+    mean_iRMSD,
+    rmsd,
+    ssRMSD,
+)
 
 
 @pytest.fixture
@@ -806,3 +815,340 @@ class TestFnat:
         )
 
         assert fnat_val == 0.0
+
+
+class TestIdentifyInterfaceResidues:
+    """Tests for the identify_interface_residues function."""
+
+    def test_basic_interface_identification(self, antibody_antigen_pdb_files):
+        """Test basic interface residue identification between antibody and antigen chains."""
+        file_path = antibody_antigen_pdb_files[0]
+
+        # Get interface residues with default parameters
+        ab_interface, ag_interface = identify_interface_residues(
+            file_path, antibody_chains=["A", "B"], antigen_chains=["C"]
+        )
+
+        # Verify that interface residues were identified
+        assert len(ab_interface) > 0, "No antibody interface residues identified"
+        assert len(ag_interface) > 0, "No antigen interface residues identified"
+
+        # Verify that the interface residues are Bio.PDB.Residue objects
+        assert all(isinstance(res, Residue) for res in ab_interface)
+        assert all(isinstance(res, Residue) for res in ag_interface)
+
+    def test_cutoff_effect(self, antibody_antigen_pdb_files):
+        """Test the effect of different cutoff values on interface residue identification."""
+        file_path = antibody_antigen_pdb_files[0]
+
+        # Get interface residues with default cutoff (10.0 Å)
+        ab_interface_default, ag_interface_default = identify_interface_residues(
+            file_path, antibody_chains=["A", "B"], antigen_chains=["C"]
+        )
+
+        # Get interface residues with smaller cutoff (5.0 Å)
+        ab_interface_small, ag_interface_small = identify_interface_residues(
+            file_path,
+            antibody_chains=["A", "B"],
+            antigen_chains=["C"],
+            interface_cutoff=5.0,
+        )
+
+        # Get interface residues with larger cutoff (15.0 Å)
+        ab_interface_large, ag_interface_large = identify_interface_residues(
+            file_path,
+            antibody_chains=["A", "B"],
+            antigen_chains=["C"],
+            interface_cutoff=15.0,
+        )
+
+        # Smaller cutoff should result in fewer interface residues
+        assert len(ab_interface_small) <= len(ab_interface_default)
+        assert len(ag_interface_small) <= len(ag_interface_default)
+
+        # Larger cutoff should result in more interface residues
+        assert len(ab_interface_large) >= len(ab_interface_default)
+        assert len(ag_interface_large) >= len(ag_interface_default)
+
+    def test_single_chain_input(self, antibody_antigen_pdb_files):
+        """Test interface residue identification with single chain inputs."""
+        file_path = antibody_antigen_pdb_files[0]
+
+        # Get interface residues with single antibody chain
+        ab_interface_single, ag_interface_single = identify_interface_residues(
+            file_path, antibody_chains=["A"], antigen_chains=["C"]
+        )
+
+        # Get interface residues with both antibody chains
+        ab_interface_both, ag_interface_both = identify_interface_residues(
+            file_path, antibody_chains=["A", "B"], antigen_chains=["C"]
+        )
+
+        # Single antibody chain should result in fewer interface residues
+        assert len(ab_interface_single) <= len(ab_interface_both)
+
+        # Antigen interface may differ depending on which antibody chains interact with it
+        assert isinstance(ag_interface_single, list)
+        assert isinstance(ag_interface_both, list)
+
+    def test_automatic_antigen_chain_detection(self, antibody_antigen_pdb_files):
+        """Test interface residue identification with automatic antigen chain detection."""
+        file_path = antibody_antigen_pdb_files[0]
+
+        # Get interface residues with explicit antigen chain
+        ab_interface_explicit, ag_interface_explicit = identify_interface_residues(
+            file_path, antibody_chains=["A", "B"], antigen_chains=["C"]
+        )
+
+        # Get interface residues with automatic antigen chain detection
+        ab_interface_auto, ag_interface_auto = identify_interface_residues(
+            file_path, antibody_chains=["A", "B"], antigen_chains=None
+        )
+
+        # Both approaches should identify interface residues
+        assert len(ab_interface_auto) > 0
+        assert len(ag_interface_auto) > 0
+
+        # Since we know the antigen chain is 'C', results should be similar
+        # (They might not be exactly the same due to implementation details of the automatic detection)
+        assert isinstance(ab_interface_auto, list)
+        assert isinstance(ag_interface_auto, list)
+
+    def test_path_object_input(self, antibody_antigen_pdb_files):
+        """Test interface residue identification with Path object input."""
+        file_path_str = antibody_antigen_pdb_files[0]
+        file_path_obj = Path(file_path_str)
+
+        # Get interface residues with string path
+        ab_interface_str, ag_interface_str = identify_interface_residues(
+            file_path_str, antibody_chains=["A", "B"], antigen_chains=["C"]
+        )
+
+        # Get interface residues with Path object
+        ab_interface_obj, ag_interface_obj = identify_interface_residues(
+            file_path_obj, antibody_chains=["A", "B"], antigen_chains=["C"]
+        )
+
+        # Results should be identical
+        assert len(ab_interface_str) == len(ab_interface_obj)
+        assert len(ag_interface_str) == len(ag_interface_obj)
+
+
+class TestIRMSD:
+    """Tests for the iRMSD function."""
+
+    def test_basic_irmsd_calculation(self, antibody_antigen_pdb_files):
+        """Test basic iRMSD calculation between two structures."""
+        file_paths = antibody_antigen_pdb_files[:2]  # Take the first two files
+
+        # Calculate iRMSD with default parameters
+        irmsd_value = iRMSD(
+            file_paths[0],
+            file_paths[1],
+            antibody_chains=["A", "B"],
+            antigen_chains=["C"],
+        )
+
+        # iRMSD should be a non-negative number
+        assert irmsd_value >= 0
+        # For our test structures, iRMSD should be a reasonable value
+        assert irmsd_value < 10.0
+
+    def test_different_interface_cutoffs(self, antibody_antigen_pdb_files):
+        """Test the effect of different interface cutoffs on iRMSD calculation."""
+        file_paths = antibody_antigen_pdb_files[:2]
+
+        # Calculate iRMSD with default cutoff (10.0 Å)
+        irmsd_default = iRMSD(
+            file_paths[0],
+            file_paths[1],
+            antibody_chains=["A", "B"],
+            antigen_chains=["C"],
+        )
+
+        # Calculate iRMSD with smaller cutoff (5.0 Å)
+        irmsd_small = iRMSD(
+            file_paths[0],
+            file_paths[1],
+            antibody_chains=["A", "B"],
+            antigen_chains=["C"],
+            interface_cutoff=5.0,
+        )
+
+        # Calculate iRMSD with larger cutoff (15.0 Å)
+        irmsd_large = iRMSD(
+            file_paths[0],
+            file_paths[1],
+            antibody_chains=["A", "B"],
+            antigen_chains=["C"],
+            interface_cutoff=15.0,
+        )
+
+        # iRMSD values should be different with different cutoffs
+        # The exact relationship depends on the structures, but they should be valid numbers
+        assert isinstance(irmsd_default, float)
+        assert isinstance(irmsd_small, float)
+        assert isinstance(irmsd_large, float)
+
+    def test_different_atom_types(self, antibody_antigen_pdb_files):
+        """Test iRMSD calculation with different atom types."""
+        file_paths = antibody_antigen_pdb_files[:2]
+
+        # Calculate iRMSD with default atom types (CA)
+        irmsd_ca = iRMSD(
+            file_paths[0],
+            file_paths[1],
+            antibody_chains=["A", "B"],
+            antigen_chains=["C"],
+        )
+
+        # Calculate iRMSD with CB atoms
+        irmsd_cb = iRMSD(
+            file_paths[0],
+            file_paths[1],
+            antibody_chains=["A", "B"],
+            antigen_chains=["C"],
+            atom_types=["CB"],
+        )
+
+        # Calculate iRMSD with both CA and CB atoms
+        irmsd_both = iRMSD(
+            file_paths[0],
+            file_paths[1],
+            antibody_chains=["A", "B"],
+            antigen_chains=["C"],
+            atom_types=["CA", "CB"],
+        )
+
+        # iRMSD values should be different with different atom types
+        assert isinstance(irmsd_ca, float)
+        assert isinstance(irmsd_cb, float)
+        assert isinstance(irmsd_both, float)
+
+    def test_automatic_antigen_detection(self, antibody_antigen_pdb_files):
+        """Test iRMSD calculation with automatic antigen chain detection."""
+        file_paths = antibody_antigen_pdb_files[:2]
+
+        # Calculate iRMSD with explicit antigen chain
+        irmsd_explicit = iRMSD(
+            file_paths[0],
+            file_paths[1],
+            antibody_chains=["A", "B"],
+            antigen_chains=["C"],
+        )
+
+        # Calculate iRMSD with automatic antigen chain detection
+        irmsd_auto = iRMSD(
+            file_paths[0],
+            file_paths[1],
+            antibody_chains=["A", "B"],
+            antigen_chains=None,
+        )
+
+        # Both approaches should produce valid iRMSD values
+        assert isinstance(irmsd_explicit, float)
+        assert isinstance(irmsd_auto, float)
+
+
+class TestMeanIRMSD:
+    """Tests for the mean_iRMSD function."""
+
+    def test_basic_mean_irmsd_calculation(self, antibody_antigen_pdb_files):
+        """Test basic mean iRMSD calculation with multiple files."""
+        file_paths = antibody_antigen_pdb_files
+
+        # Calculate mean iRMSD with default parameters
+        mean_irmsd_value = mean_iRMSD(
+            file_paths, antibody_chains=["A", "B"], antigen_chains=["C"]
+        )
+
+        # Mean iRMSD should be a non-negative number
+        assert mean_irmsd_value >= 0
+        # For our test structures, mean iRMSD should be a reasonable value
+        assert mean_irmsd_value < 10.0
+
+    def test_with_different_combinations(self, antibody_antigen_pdb_files):
+        """Test mean iRMSD calculation with different file combinations."""
+        # All files
+        all_files = antibody_antigen_pdb_files
+
+        # Calculate mean iRMSD with all files
+        mean_irmsd_all = mean_iRMSD(
+            all_files, antibody_chains=["A", "B"], antigen_chains=["C"]
+        )
+
+        # Calculate mean iRMSD with just two files (first and second)
+        mean_irmsd_two = mean_iRMSD(
+            all_files[:2], antibody_chains=["A", "B"], antigen_chains=["C"]
+        )
+
+        # Both should produce valid mean iRMSD values
+        assert isinstance(mean_irmsd_all, float)
+        assert isinstance(mean_irmsd_two, float)
+
+    def test_with_directory_input(self, antibody_antigen_pdb_files, temp_pdb_dir):
+        """Test mean iRMSD calculation with directory input."""
+        # Calculate mean iRMSD with list of files
+        mean_irmsd_list = mean_iRMSD(
+            antibody_antigen_pdb_files, antibody_chains=["A", "B"], antigen_chains=["C"]
+        )
+
+        # Calculate mean iRMSD with directory input
+        mean_irmsd_dir = mean_iRMSD(
+            temp_pdb_dir, antibody_chains=["A", "B"], antigen_chains=["C"]
+        )
+
+        # Both approaches should produce valid mean iRMSD values
+        assert isinstance(mean_irmsd_list, float)
+        assert isinstance(mean_irmsd_dir, float)
+
+    def test_error_handling(self, temp_pdb_dir):
+        """Test error handling in mean_iRMSD function."""
+        # Test with nonexistent directory
+        with pytest.raises(FileNotFoundError):
+            mean_iRMSD(
+                "nonexistent_dir", antibody_chains=["A", "B"], antigen_chains=["C"]
+            )
+
+        # Create a directory with only one PDB file (insufficient for mean calculation)
+        single_file_dir = os.path.join(temp_pdb_dir, "single_file")
+        os.makedirs(single_file_dir, exist_ok=True)
+
+        with open(os.path.join(single_file_dir, "single.pdb"), "w") as f:
+            f.write(
+                "ATOM      1  CA  ALA A   1       0.000   0.000   0.000  1.00  0.00           C"
+            )
+
+        # Test with directory containing only one file
+        with pytest.raises(ValueError):
+            mean_iRMSD(
+                single_file_dir, antibody_chains=["A", "B"], antigen_chains=["C"]
+            )
+
+    def test_with_log_directory(self, antibody_antigen_pdb_files, temp_pdb_dir):
+        """Test mean iRMSD calculation with log directory."""
+        # Create a log directory
+        log_dir = os.path.join(temp_pdb_dir, "log")
+        os.makedirs(log_dir, exist_ok=True)
+
+        # Calculate mean iRMSD with log directory
+        mean_irmsd_value = mean_iRMSD(
+            antibody_antigen_pdb_files,
+            antibody_chains=["A", "B"],
+            antigen_chains=["C"],
+            log_dir=log_dir,
+        )
+
+        # Mean iRMSD should be a valid value
+        assert mean_irmsd_value >= 0
+
+        # Check if the log file was created
+        log_file_path = os.path.join(log_dir, "irmsd.csv")
+        assert os.path.exists(log_file_path)
+
+        # Check if the log file contains valid data
+        df = pd.read_csv(log_file_path)
+        assert len(df) > 0
+        assert "filepath_1" in df.columns
+        assert "filepath_2" in df.columns
+        assert "irmsd" in df.columns
