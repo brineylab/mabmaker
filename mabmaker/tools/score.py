@@ -143,6 +143,11 @@ def find_antibody_bound_antigen_chain(
     return best, contact_counts, min_distances
 
 
+# -----------------------------------------
+#               ssRMSD
+# -----------------------------------------
+
+
 def rmsd(
     file_path1: str,
     file_path2: str,
@@ -332,3 +337,264 @@ def ssRMSD(
         df.to_csv(csv_path, index=False)
 
     return ss_rmsd
+
+
+# -----------------------------------------
+#               fnat
+# -----------------------------------------
+
+
+def identify_contacts(
+    file_path: str | Path,
+    antibody_chains: list[str],
+    antigen_chains: list[str] | None = None,
+    cut_off: float = 5.0,
+    quiet: bool = True,
+) -> set:
+    """
+    Identify atom-level contacts between antibody and antigen chains.
+
+    Parameters
+    ----------
+    file_path : str or Path
+        The path to the PDB/CIF file.
+
+    antibody_chains : list[str]
+        The chain ID(s) to consider as antibody.
+
+    antigen_chains : list[str] or None, optional, default=None
+        The chain ID(s) to consider as antigen. If not provided, the function will
+        use find_antibody_bound_antigen_chain to identify the appropriate chain.
+
+    cut_off : float, optional, default=5.0
+        The cutoff distance (in Ångstroms) for a pair of atoms to be considered in contact.
+
+    quiet : bool, optional, default=True
+        Suppress verbose output from the PDB parser.
+
+    Returns
+    -------
+    set
+        A set of ((ab_residue_id, ab_atom_id), (ag_residue_id, ag_atom_id)) tuples
+        representing contacts between antibody and antigen atoms.
+    """
+    # Convert file_path to Path if it's a string
+    if isinstance(file_path, str):
+        file_path = Path(file_path)
+
+    # read input structure
+    struct = _get_structure(file_path, quiet=quiet)
+
+    # If antigen_chains is None, find the antigen chain with most contacts
+    if antigen_chains is None:
+        ag_chain, _, _ = find_antibody_bound_antigen_chain(
+            file_path, antibody_chains=antibody_chains, cut_off=cut_off
+        )
+        antigen_chains = [ag_chain]
+
+    # gather antibody atoms
+    ab_atoms = []
+    for ch in struct:
+        if ch.id in antibody_chains:
+            ab_atoms.extend(atoms_of(ch))
+
+    # Handle case when no antibody atoms are found (e.g., chain doesn't exist)
+    if not ab_atoms:
+        return set()
+
+    # gather antigen atoms and identify contacts
+    contacts = set()
+    for ch in struct:
+        if ch.id in antigen_chains:
+            ag_atoms = atoms_of(ch)
+
+            # Skip if no antigen atoms are found in this chain
+            if not ag_atoms:
+                continue
+
+            # Use NeighborSearch to find atoms within cut_off distance
+            ns = NeighborSearch(ab_atoms)
+            for ag_atom in ag_atoms:
+                for ab_atom in ns.search(ag_atom.coord, cut_off, level="A"):
+                    # Store a unique identifier for the contact
+                    ab_id = (ab_atom.get_parent().id, ab_atom.get_id())
+                    ag_id = (ag_atom.get_parent().id, ag_atom.get_id())
+                    contacts.add((ab_id, ag_id))
+
+    return contacts
+
+
+def fnat(
+    filepath_1: str | Path,
+    filepath_2: str | Path,
+    antibody_chains: list[str],
+    antigen_chains: list[str] | None = None,
+    cut_off: float = 5.0,
+    quiet: bool = True,
+) -> float:
+    """
+    Calculate the fraction of native contacts (fnat) between antibody and antigen chains
+    for a pair of PDB/CIF files.
+
+    The fraction of native contacts is defined as the number of contacts in the second structure
+    that are also present in the first (reference/native) structure, divided by the total
+    number of contacts in the first structure.
+
+    Parameters
+    ----------
+    filepath_1 : str or Path
+        Path to the first (reference/native) PDB/CIF file.
+
+    filepath_2 : str or Path
+        Path to the second (model) PDB/CIF file.
+
+    antibody_chains : list[str]
+        The chain ID(s) to consider as antibody.
+
+    antigen_chains : list[str] or None, optional, default=None
+        The chain ID(s) to consider as antigen. If not provided, the function will
+        use find_antibody_bound_antigen_chain to identify the appropriate chain.
+
+    cut_off : float, optional, default=5.0
+        The cutoff distance (in Ångstroms) for a pair of atoms to be considered in contact.
+
+    quiet : bool, optional, default=True
+        Suppress verbose output from the PDB parser.
+
+    Returns
+    -------
+    float
+        The fraction of native contacts between the two structures.
+    """
+    try:
+        # Identify contacts in both structures
+        native_contacts = identify_contacts(
+            filepath_1, antibody_chains, antigen_chains, cut_off, quiet
+        )
+        model_contacts = identify_contacts(
+            filepath_2, antibody_chains, antigen_chains, cut_off, quiet
+        )
+
+        # Calculate the fraction of native contacts
+        if len(native_contacts) > 0:
+            # Count shared contacts
+            shared_contacts = native_contacts.intersection(model_contacts)
+            return len(shared_contacts) / len(native_contacts)
+        else:
+            # No contacts in the native structure
+            return 0.0
+    except Exception as e:
+        print(f"Error calculating fnat for {filepath_1} and {filepath_2}: {e}")
+        return 0.0
+
+
+def mean_fnat(
+    files: list[str] | str,
+    antibody_chains: str | list[str] = ["A", "B"],
+    antigen_chains: str | list[str] | None = None,
+    cut_off: float = 5.0,
+    quiet: bool = True,
+    log_dir: str | Path | None = None,
+) -> float:
+    """
+    Calculate the mean fraction of native contacts (fnat) between antibody and antigen chains
+    across all permutations of PDB/CIF files.
+
+    The fraction of native contacts is defined as the number of contacts in the second structure
+    that are also present in the first (native) structure, divided by the total number of contacts
+    in the first structure.
+
+    Parameters
+    ----------
+    files : list[str] or str
+        Either a list of PDB/CIF file paths or a directory path containing PDB/CIF files.
+
+    antibody_chains : str or list[str], optional, default=["A", "B"]
+        The chain ID(s) to consider as antibody.
+
+    antigen_chains : str or list[str] or None, optional, default=None
+        The chain ID(s) to consider as antigen. If not provided, the function will
+        use find_antibody_bound_antigen_chain to identify the appropriate chain.
+
+    cut_off : float, optional, default=5.0
+        The cutoff distance (in Ångstroms) for a pair of atoms to be considered in contact.
+
+    quiet : bool, optional, default=True
+        Suppress verbose output from the PDB parser.
+
+    log_dir : str or Path or None, optional, default=None
+        Directory path to save CSV log file with individual fnat values.
+        If not provided, no log file will be generated.
+
+    Returns
+    -------
+    float
+        The mean fraction of native contacts.
+
+    Raises
+    ------
+    ValueError
+        If less than two files are provided or found in the specified directory.
+    FileNotFoundError
+        If the specified directory or files do not exist.
+    """
+    # Convert antibody_chains to list if it's a string
+    if isinstance(antibody_chains, str):
+        antibody_chains = [antibody_chains]
+
+    # Handle files input (directory or list of files)
+    if isinstance(files, str):
+        dir_path = Path(files)
+        if not dir_path.exists():
+            raise FileNotFoundError(f"Directory does not exist: {dir_path}")
+        if not dir_path.is_dir():
+            raise ValueError(f"Path is not a directory: {dir_path}")
+
+        # Get all PDB and CIF files in the directory
+        pdb_files = list(dir_path.glob("*.pdb")) + list(dir_path.glob("*.ent"))
+        cif_files = list(dir_path.glob("*.cif")) + list(dir_path.glob("*.mmcif"))
+        files = pdb_files + cif_files
+    else:
+        # convert string paths to Path objects
+        files = [Path(f) if isinstance(f, str) else f for f in files]
+
+        # verify all files exist
+        for file_path in files:
+            if not file_path.exists():
+                raise FileNotFoundError(f"File does not exist: {file_path}")
+
+    # need at least 2 files for pairwise comparisons
+    if len(files) < 2:
+        raise ValueError("At least two PDB/CIF files are required for fnat calculation")
+
+    # create log directory if provided and it doesn't exist
+    if log_dir is not None:
+        log_dir = Path(log_dir)
+        log_dir.mkdir(parents=True, exist_ok=True)
+
+    # Convert antigen_chains to list if it's a string
+    if isinstance(antigen_chains, str):
+        antigen_chains = [antigen_chains]
+
+    # Calculate fnat for all permutations of files
+    fnat_data = []
+    for file1, file2 in itertools.permutations(files, 2):
+        # Calculate fnat for this pair of files
+        fnat_val = fnat(file1, file2, antibody_chains, antigen_chains, cut_off, quiet)
+
+        fnat_data.append({"filepath_1": file1, "filepath_2": file2, "fnat": fnat_val})
+
+    # Calculate mean fnat value
+    if not fnat_data:
+        return 0.0  # Return 0 if no valid fnat calculations
+
+    fnat_values = [r["fnat"] for r in fnat_data]
+    mean_fnat_val = np.mean(fnat_values)
+
+    # Save fnat values to CSV if log directory is provided
+    if log_dir is not None and fnat_data:
+        df = pd.DataFrame(fnat_data)
+        csv_path = os.path.join(log_dir, "fnat_values.csv")
+        df.to_csv(csv_path, index=False)
+
+    return mean_fnat_val
