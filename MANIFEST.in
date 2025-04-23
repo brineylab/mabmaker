@@ -2,8 +2,11 @@ include README.md
 include LICENSE
 include requirements*
 
+include mabmaker/*
+
 include mabmaker/scripts/*
 include mabmaker/tools/*
+include mabmaker/utils/*
 
 include mabmaker/models/*
 include mabmaker/models/LigandMPNN/*
