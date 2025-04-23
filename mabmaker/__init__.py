@@ -5,6 +5,6 @@
 
 import warnings
 
-warnings.filterwarnings("ignore", category=DeprecationWarning)
+warnings.filterwarnings("ignore")
 
 from . import tl, tools, utils
