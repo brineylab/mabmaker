@@ -121,15 +121,15 @@ class BoltzFormattingMixin:
                         }
                     )
                     # add covalent bonds between glycan and protein
-                    for protein_copy_id, glycan_ccd_copy_id in zip(
-                        protein_ids, glycan_ccd_ids
+                    for copy_idx, (protein_copy_id, glycan_ccd_copy_id) in enumerate(
+                        zip(protein_ids, glycan_ccd_ids)
                     ):
                         if ccd_idx == 0:
                             prev_chain_id = protein_copy_id
                             prev_atom_name = "ND2"
                             prev_atom_position = glycan.position
                         else:
-                            prev_chain_id = prev_glycan_ccd_ids[glycan_ccd_copy_id]
+                            prev_chain_id = prev_glycan_ccd_ids[copy_idx]
                             prev_atom_name = ccd_bond_atom_lookup(
                                 glycan_ccd_list[ccd_idx - 1]
                             )
