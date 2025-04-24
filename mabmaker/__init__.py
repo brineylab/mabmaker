@@ -3,8 +3,10 @@
 # SPDX-License-Identifier: MIT
 
 
-import warnings
+import os
+from contextlib import redirect_stderr, redirect_stdout
 
-warnings.filterwarnings("ignore")
-
-from . import tl, tools, utils
+# suppress warnings, which are crazy for Chai-1
+with open(os.devnull, "w") as devnull:
+    with redirect_stdout(devnull), redirect_stderr(devnull):
+        from . import tl, tools, utils
