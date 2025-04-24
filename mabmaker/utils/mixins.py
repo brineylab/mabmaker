@@ -107,6 +107,7 @@ class BoltzFormattingMixin:
             for glycan in chain.glycans:
                 # boltz requires a separate ligand entry (and bond) for each CCD in the glycan
                 glycan_ccd_list = glycan.ccd_list()
+                prev_glycan_ccd_ids = None
                 for ccd_idx, glycan_ccd in enumerate(glycan_ccd_list):
                     glycan_ccd_ids = [
                         glycan_chain_names.popleft() for _ in range(chain.count)
@@ -128,7 +129,7 @@ class BoltzFormattingMixin:
                             prev_atom_name = "ND2"
                             prev_atom_position = glycan.position
                         else:
-                            prev_chain_id = glycan_ccd_ids[ccd_idx - 1]
+                            prev_chain_id = prev_glycan_ccd_ids[glycan_ccd_copy_id]
                             prev_atom_name = ccd_bond_atom_lookup(
                                 glycan_ccd_list[ccd_idx - 1]
                             )
@@ -145,6 +146,7 @@ class BoltzFormattingMixin:
                                 }
                             }
                         )
+                    prev_glycan_ccd_ids = glycan_ccd_ids
         # DNA sequences
         for seq in self.dna_sequences:
             dna_ids = [dna_chain_names.popleft() for _ in range(seq.count)]
