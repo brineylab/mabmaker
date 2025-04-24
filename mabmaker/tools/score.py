@@ -949,7 +949,7 @@ def mean_iRMSD(
     # save iRMSD values to CSV if log directory is provided
     if log_dir is not None and irmsd_data:
         df = pd.DataFrame(irmsd_data)
-        csv_path = os.path.join(log_dir, "irmsd.csv")
+        csv_path = os.path.join(log_dir, "irmsd_values.csv")
         df.to_csv(csv_path, index=False)
 
     return mean_irmsd_val
