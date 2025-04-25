@@ -10,9 +10,17 @@ import os
 import random
 import tarfile
 import time
-from typing import List, Tuple
+from pathlib import Path
+from typing import List, Literal, Mapping, Optional, Tuple
 
+import pandas as pd
 import requests
+from chai_lab.data.parsing.msas.aligned_pqt import (
+    a3m_to_aligned_dataframe,
+    expected_basename,
+)
+from chai_lab.data.parsing.msas.data_source import MSADataSource
+from chai_lab.utils.typing import typecheck
 from tqdm.auto import tqdm
 
 __all__ = ["run_mmseqs2"]
@@ -113,14 +121,18 @@ def run_mmseqs2(
                     headers=headers,
                 )
             except requests.exceptions.Timeout:
-                logger.warning("Timeout while submitting to MSA server. Retrying...")
+                if not quiet:
+                    logger.warning(
+                        "Timeout while submitting to MSA server. Retrying..."
+                    )
                 continue
             except Exception as e:
                 error_count += 1
-                logger.warning(
-                    f"Error while fetching result from MSA server. Retrying... ({error_count}/5)"
-                )
-                logger.warning(f"Error: {e}")
+                if not quiet:
+                    logger.warning(
+                        f"Error while fetching result from MSA server. Retrying... ({error_count}/5)"
+                    )
+                    logger.warning(f"Error: {e}")
                 time.sleep(5)
                 if error_count > 5:
                     raise
@@ -130,7 +142,8 @@ def run_mmseqs2(
         try:
             out = res.json()
         except ValueError:
-            logger.error(f"Server didn't reply with json: {res.text}")
+            if not quiet:
+                logger.error(f"Server didn't reply with json: {res.text}")
             out = {"status": "ERROR"}
         return out
 
@@ -142,16 +155,18 @@ def run_mmseqs2(
                     f"{host_url}/ticket/{ID}", timeout=6.02, headers=headers
                 )
             except requests.exceptions.Timeout:
-                logger.warning(
-                    "Timeout while fetching status from MSA server. Retrying..."
-                )
+                if not quiet:
+                    logger.warning(
+                        "Timeout while fetching status from MSA server. Retrying..."
+                    )
                 continue
             except Exception as e:
                 error_count += 1
-                logger.warning(
-                    f"Error while fetching result from MSA server. Retrying... ({error_count}/5)"
-                )
-                logger.warning(f"Error: {e}")
+                if not quiet:
+                    logger.warning(
+                        f"Error while fetching result from MSA server. Retrying... ({error_count}/5)"
+                    )
+                    logger.warning(f"Error: {e}")
                 time.sleep(5)
                 if error_count > 5:
                     raise
@@ -160,7 +175,8 @@ def run_mmseqs2(
         try:
             out = res.json()
         except ValueError:
-            logger.error(f"Server didn't reply with json: {res.text}")
+            if not quiet:
+                logger.error(f"Server didn't reply with json: {res.text}")
             out = {"status": "ERROR"}
         return out
 
@@ -172,16 +188,18 @@ def run_mmseqs2(
                     f"{host_url}/result/download/{ID}", timeout=6.02, headers=headers
                 )
             except requests.exceptions.Timeout:
-                logger.warning(
-                    "Timeout while fetching result from MSA server. Retrying..."
-                )
+                if not quiet:
+                    logger.warning(
+                        "Timeout while fetching result from MSA server. Retrying..."
+                    )
                 continue
             except Exception as e:
                 error_count += 1
-                logger.warning(
-                    f"Error while fetching result from MSA server. Retrying... ({error_count}/5)"
-                )
-                logger.warning(f"Error: {e}")
+                if not quiet:
+                    logger.warning(
+                        f"Error while fetching result from MSA server. Retrying... ({error_count}/5)"
+                    )
+                    logger.warning(f"Error: {e}")
                 time.sleep(5)
                 if error_count > 5:
                     raise
@@ -261,7 +279,8 @@ def run_mmseqs2(
                 pbar.set_description(out["status"])
                 while out["status"] in ["UNKNOWN", "RUNNING", "PENDING"]:
                     t = 5 + random.randint(0, 5)
-                    logger.error(f"Sleeping for {t}s. Reason: {out['status']}")
+                    if not quiet:
+                        logger.error(f"Sleeping for {t}s. Reason: {out['status']}")
                     time.sleep(t)
                     out = status(ID)
                     pbar.set_description(out["status"])
@@ -333,16 +352,18 @@ def run_mmseqs2(
                             headers=headers,
                         )
                     except requests.exceptions.Timeout:
-                        logger.warning(
-                            "Timeout while submitting to template server. Retrying..."
-                        )
+                        if not quiet:
+                            logger.warning(
+                                "Timeout while submitting to template server. Retrying..."
+                            )
                         continue
                     except Exception as e:
                         error_count += 1
-                        logger.warning(
-                            f"Error while fetching result from template server. Retrying... ({error_count}/5)"
-                        )
-                        logger.warning(f"Error: {e}")
+                        if not quiet:
+                            logger.warning(
+                                f"Error while fetching result from template server. Retrying... ({error_count}/5)"
+                            )
+                            logger.warning(f"Error: {e}")
                         time.sleep(5)
                         if error_count > 5:
                             raise
@@ -386,3 +407,100 @@ def run_mmseqs2(
         template_paths = template_paths_
 
     return (a3m_lines, template_paths) if use_templates else a3m_lines
+
+
+# -----------------------------
+#        Chai-1 MSAs
+# -----------------------------
+
+# adapted from https://github.com/chaidiscovery/chai-lab/blob/main/chai_lab/data/parsing/msas/aligned_pqt.py
+
+
+@typecheck
+def merge_multi_a3m_to_aligned_dataframe(
+    msa_a3m_files: Mapping[Path, MSADataSource],
+    insert_keys_for_sources: Literal["all", "none", "uniprot"] = "uniprot",
+) -> pd.DataFrame:
+    """Merge multiple a3ms from the same query sequence into a single aligned parquet."""
+    dfs = {
+        src: a3m_to_aligned_dataframe(
+            a3m_path,
+            src,
+            insert_pairing_key=(
+                src in (MSADataSource.UNIPROT, MSADataSource.UNIPROT_N3)
+                if insert_keys_for_sources == "uniprot"
+                else (insert_keys_for_sources == "all")
+            ),
+        )
+        for a3m_path, src in msa_a3m_files.items()
+    }
+    # Check that all the dfs share the same query sequence
+    queries = {df.iloc[0]["sequence"] for df in dfs.values()}
+    assert len(queries) == 1
+    # As a base, set the query sequence
+    chunks = [next(iter(dfs.values())).iloc[0:1]]
+    for df in dfs.values():
+        # Take the non-query sequences for all sources
+        chunks.append(df.iloc[1:])
+    return pd.concat(chunks, ignore_index=True).reset_index(drop=True)
+
+
+def process_a3ms_for_chai(
+    a3m_files: str | Path | list[str | Path], output_directory: str | Path = None
+) -> None:
+    """
+    Converts one or more a3m-formatted alignment files into a single aligned.pqt file.
+    If multiple files are provided, they are expected to be derived from the same query sequence.
+
+    Parameters
+    ----------
+    a3m_files : str | Path | list[str | Path]
+        Path to a3m files. Can be any of the following:
+        - A directory containing a3m files
+        - A single a3m file path
+        - A list of a3m file paths
+
+    output_directory : str | Path
+        The path to the output directory.
+
+    Returns
+    -------
+    None
+
+    """
+    # process input
+    if isinstance(a3m_files, (str, Path)):
+        if os.path.isdir(a3m_files):
+            a3m_dir = Path(a3m_files)
+            a3m_files = list(a3m_dir.glob("*.a3m"))
+            if not a3m_files:
+                raise ValueError(f"No a3m files found in {a3m_files}")
+        elif os.path.isfile(a3m_files):
+            a3m_files = [Path(a3m_files)]
+        else:
+            raise ValueError(f"Invalid a3m path: {a3m_files}")
+    else:
+        a3m_files = [Path(a3m_file) for a3m_file in a3m_files]
+
+    # map a3m files to their source database
+    mapped_a3m_files = {}
+    for a3m_file in a3m_files:
+        dbname = a3m_file.stem.replace("_hits", "").replace("hits_", "")
+        try:
+            msa_src = MSADataSource(dbname)
+        except ValueError:
+            msa_src = MSADataSource.UNIREF90
+        mapped_a3m_files[a3m_file] = msa_src
+
+    # merge a3m files into a dataframe
+    df = merge_multi_a3m_to_aligned_dataframe(
+        mapped_a3m_files, insert_keys_for_sources="uniprot"
+    )
+
+    # get the query sequence and use it to determine where we save the file.
+    query_seq: str = df.iloc[0]["sequence"]
+
+    # output
+    outdir = Path(output_directory)
+    outdir.mkdir(exist_ok=True, parents=True)
+    df.to_parquet(outdir / expected_basename(query_seq))
