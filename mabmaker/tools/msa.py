@@ -15,6 +15,8 @@ from typing import List, Tuple
 import requests
 from tqdm.auto import tqdm
 
+__all__ = ["run_mmseqs2"]
+
 logger = logging.getLogger(__name__)
 
 
