@@ -14,10 +14,12 @@ from Bio.PDB.Residue import Residue
 from Bio.PDB.Structure import Structure
 
 from mabmaker.tools.score import (
+    chain_COM_distance,
     fnat,
     identify_contacts,
     identify_interface_residues,
     iRMSD,
+    mean_COM_distance,
     mean_fnat,
     mean_iRMSD,
     rmsd,
@@ -1152,3 +1154,337 @@ class TestMeanIRMSD:
         assert "filepath_1" in df.columns
         assert "filepath_2" in df.columns
         assert "irmsd" in df.columns
+
+
+class TestChainCOMDistance:
+    """Tests for the chain_COM_distance function."""
+
+    def test_basic_com_distance_calculation(self, antibody_antigen_pdb_files):
+        """Test basic COM distance calculation between two antibody-antigen complexes."""
+        file_paths = antibody_antigen_pdb_files
+
+        # Calculate COM distances between first two files
+        com_distances = chain_COM_distance(file_paths[0], file_paths[1], ["A", "B"])
+
+        # Verify that distances are calculated for both chains
+        assert "A" in com_distances
+        assert "B" in com_distances
+
+        # COM distances should be non-negative numbers
+        assert com_distances["A"] >= 0
+        assert com_distances["B"] >= 0
+
+        # Since our test files have slight variations, distances should be small but measurable
+        assert 0 <= com_distances["A"] < 5.0
+        assert 0 <= com_distances["B"] < 5.0
+
+    def test_single_chain_input(self, antibody_antigen_pdb_files):
+        """Test COM distance calculation with a single antibody chain."""
+        file_paths = antibody_antigen_pdb_files
+
+        # Test with single chain as string
+        com_distances_str = chain_COM_distance(file_paths[0], file_paths[1], "A")
+        assert "A" in com_distances_str
+        assert com_distances_str["A"] >= 0
+
+        # Test with single chain as list
+        com_distances_list = chain_COM_distance(file_paths[0], file_paths[1], ["A"])
+        assert "A" in com_distances_list
+        assert com_distances_list["A"] >= 0
+
+        # Both methods should give identical results
+        assert com_distances_str["A"] == com_distances_list["A"]
+
+    def test_different_atom_types(self, antibody_antigen_pdb_files):
+        """Test COM distance calculation with different atom types."""
+        file_paths = antibody_antigen_pdb_files
+
+        # Calculate with CA atoms (default)
+        ca_distances = chain_COM_distance(file_paths[0], file_paths[1], ["A", "B"])
+
+        # Calculate with CB atoms
+        cb_distances = chain_COM_distance(
+            file_paths[0], file_paths[1], ["A", "B"], atom_types=["CB"]
+        )
+
+        # Calculate with both CA and CB atoms
+        all_distances = chain_COM_distance(
+            file_paths[0], file_paths[1], ["A", "B"], atom_types=["CA", "CB"]
+        )
+
+        # All should return values for both chains
+        assert "A" in ca_distances and "B" in ca_distances
+        assert "A" in cb_distances and "B" in cb_distances
+        assert "A" in all_distances and "B" in all_distances
+
+        # Using different atom types should generally give different results
+        # (This may not always be true, but is likely for our test structures)
+        assert (
+            ca_distances["A"] != cb_distances["A"]
+            or ca_distances["B"] != cb_distances["B"]
+        )
+
+    def test_explicit_antigen_chain(self, antibody_antigen_pdb_files):
+        """Test COM distance calculation with explicitly specified antigen chain."""
+        file_paths = antibody_antigen_pdb_files
+
+        # Calculate with default auto-detection
+        auto_distances = chain_COM_distance(file_paths[0], file_paths[1], ["A", "B"])
+
+        # Calculate with explicit antigen chain
+        explicit_distances = chain_COM_distance(
+            file_paths[0], file_paths[1], ["A", "B"], antigen_chains=["C"]
+        )
+
+        # Both should return values for both chains
+        assert "A" in auto_distances and "B" in auto_distances
+        assert "A" in explicit_distances and "B" in explicit_distances
+
+        # For our test structures, explicit and auto-detected should be the same
+        # since chain C is the only antigen chain
+        assert abs(auto_distances["A"] - explicit_distances["A"]) < 1e-6
+        assert abs(auto_distances["B"] - explicit_distances["B"]) < 1e-6
+
+    def test_path_str_and_path_object(self, antibody_antigen_pdb_files):
+        """Test COM distance calculation with file paths as strings and Path objects."""
+        file_paths = antibody_antigen_pdb_files
+
+        # Calculate with string paths
+        str_distances = chain_COM_distance(file_paths[0], file_paths[1], ["A", "B"])
+
+        # Calculate with Path objects
+        path_distances = chain_COM_distance(
+            Path(file_paths[0]), Path(file_paths[1]), ["A", "B"]
+        )
+
+        # Both methods should give identical results
+        assert str_distances["A"] == path_distances["A"]
+        assert str_distances["B"] == path_distances["B"]
+
+    def test_missing_chain(self, antibody_antigen_pdb_files):
+        """Test error handling when a requested chain is missing."""
+        file_paths = antibody_antigen_pdb_files
+
+        # Calculate with existing chains and one that doesn't exist
+        distances = chain_COM_distance(file_paths[0], file_paths[1], ["A", "B", "D"])
+
+        # Should only return results for existing chains
+        assert "A" in distances
+        assert "B" in distances
+        assert "D" not in distances
+
+    def test_error_with_nonexistent_file(self, antibody_antigen_pdb_files):
+        """Test error handling with nonexistent files."""
+        file_paths = antibody_antigen_pdb_files
+
+        # Try with a nonexistent file
+        with pytest.raises(FileNotFoundError):
+            chain_COM_distance(
+                file_paths[0], "/path/to/nonexistent/file.pdb", ["A", "B"]
+            )
+
+    def test_error_with_mismatched_antigen_chains(
+        self, antibody_antigen_pdb_files, temp_pdb_dir
+    ):
+        """Test error handling when antigen chains don't match between structures."""
+        file_paths = antibody_antigen_pdb_files
+
+        # Create a structure with different antigen chain ID
+        structure = Structure("test_diff_antigen")
+        model = Model(0)
+        structure.add(model)
+
+        # Add antibody chains A and B
+        for chain_id, z_pos in [("A", 0.0), ("B", 2.0)]:
+            chain = Chain(chain_id)
+            model.add(chain)
+            for j in range(1, 6):
+                residue = Residue((" ", j, " "), "ALA", "")
+                chain.add(residue)
+                atom = Atom("CA", [j, 0.0, z_pos], 0.0, 1.0, " ", "CA", j, "C")
+                residue.add(atom)
+
+        # Add antigen chain D (instead of C)
+        chain = Chain("D")
+        model.add(chain)
+        for j in range(1, 6):
+            residue = Residue((" ", j, " "), "GLY", "")
+            chain.add(residue)
+            atom = Atom("CA", [j + 3.0, 0.5, 1.0], 0.0, 1.0, " ", "CA", j, "C")
+            residue.add(atom)
+
+        # Save to PDB file
+        diff_antigen_file = os.path.join(temp_pdb_dir, "diff_antigen.pdb")
+        io = PDBIO()
+        io.set_structure(structure)
+        io.save(diff_antigen_file)
+
+        # Test with mismatched chains but explicit antigen specification
+        with pytest.raises(ValueError):
+            chain_COM_distance(
+                file_paths[0], diff_antigen_file, ["A", "B"], antigen_chains=["C"]
+            )
+
+        # But should work when specifying the correct antigen chain in file2
+        try:
+            result = chain_COM_distance(
+                file_paths[0],
+                diff_antigen_file,
+                ["A", "B"],
+                antigen_chains=[{"C": file_paths[0], "D": diff_antigen_file}],
+            )
+            # This attempt will also fail since our function doesn't support this mapping
+            # functionality yet - we might want to add that feature
+            assert False, "Should raise an error for unsupported chain mapping feature"
+        except (ValueError, TypeError):
+            # Either is acceptable since the feature isn't implemented
+            pass
+
+
+class TestMeanCOMDistance:
+    """Tests for the mean_COM_distance function."""
+
+    def test_basic_mean_com_calculation(self, antibody_antigen_pdb_files):
+        """Test basic mean COM distance calculation for a set of files."""
+        file_paths = antibody_antigen_pdb_files
+
+        # Calculate mean COM distances for all test files
+        mean_distances = mean_COM_distance(file_paths, ["A", "B"])
+
+        # Verify that distances are calculated for both chains
+        assert "A" in mean_distances
+        assert "B" in mean_distances
+
+        # Mean COM distances should be non-negative numbers
+        assert mean_distances["A"] >= 0
+        assert mean_distances["B"] >= 0
+
+        # Since our test files have variations, distances should be measurable
+        assert mean_distances["A"] > 0 or mean_distances["B"] > 0
+
+    def test_with_different_combinations(self, antibody_antigen_pdb_files):
+        """Test mean COM calculation with different file combinations."""
+        file_paths = antibody_antigen_pdb_files
+
+        # Calculate with all three files
+        all_distances = mean_COM_distance(file_paths, ["A", "B"])
+
+        # Calculate with just the first two files
+        pair_distances = mean_COM_distance(file_paths[:2], ["A", "B"])
+
+        # Both should return values for both chains
+        assert "A" in all_distances and "B" in all_distances
+        assert "A" in pair_distances and "B" in pair_distances
+
+        # Different file combinations should generally give different results
+        assert (
+            all_distances["A"] != pair_distances["A"]
+            or all_distances["B"] != pair_distances["B"]
+        )
+
+    def test_with_directory_input(self, antibody_antigen_pdb_files, temp_pdb_dir):
+        """Test mean COM calculation with directory path input."""
+        # Copy test files to the temporary directory
+        for file_path in antibody_antigen_pdb_files:
+            with open(file_path, "rb") as src_file:
+                with open(
+                    os.path.join(temp_pdb_dir, os.path.basename(file_path)), "wb"
+                ) as dst_file:
+                    dst_file.write(src_file.read())
+
+        # Calculate mean COM distances using directory path
+        dir_distances = mean_COM_distance(temp_pdb_dir, ["A", "B"])
+
+        # Calculate mean COM distances using file list
+        list_distances = mean_COM_distance(antibody_antigen_pdb_files, ["A", "B"])
+
+        # Both should return values for both chains
+        assert "A" in dir_distances and "B" in dir_distances
+        assert "A" in list_distances and "B" in list_distances
+
+        # Results should be similar (might not be identical due to file order differences)
+        assert abs(dir_distances["A"] - list_distances["A"]) < 1.0
+        assert abs(dir_distances["B"] - list_distances["B"]) < 1.0
+
+    def test_antibody_chains_as_string(self, antibody_antigen_pdb_files):
+        """Test mean COM calculation with antibody chain as string."""
+        file_paths = antibody_antigen_pdb_files
+
+        # Calculate with chain A as string
+        str_distances = mean_COM_distance(file_paths, "A")
+
+        # Calculate with chain A as list
+        list_distances = mean_COM_distance(file_paths, ["A"])
+
+        # Both should return a value for chain A
+        assert "A" in str_distances
+        assert "A" in list_distances
+
+        # Results should be identical
+        assert str_distances["A"] == list_distances["A"]
+
+    def test_error_handling(self, temp_pdb_dir):
+        """Test error handling for invalid inputs."""
+        # Test with nonexistent directory
+        with pytest.raises(FileNotFoundError):
+            mean_COM_distance("/nonexistent/directory", ["A", "B"])
+
+        # Test with directory containing less than 2 PDB files
+        with open(os.path.join(temp_pdb_dir, "single.pdb"), "w") as f:
+            f.write(
+                "ATOM      1  CA  ALA A   1       0.000   0.000   0.000  1.00  0.00           C  \n"
+            )
+
+        with pytest.raises(ValueError):
+            mean_COM_distance(temp_pdb_dir, ["A", "B"])
+
+    def test_with_log_directory(self, antibody_antigen_pdb_files, temp_pdb_dir):
+        """Test mean COM calculation with log directory output."""
+        file_paths = antibody_antigen_pdb_files
+        log_dir = os.path.join(temp_pdb_dir, "logs")
+
+        # Calculate mean COM distances with log directory
+        mean_distances = mean_COM_distance(file_paths, ["A", "B"], log_dir=log_dir)
+
+        # Verify that distances are calculated for both chains
+        assert "A" in mean_distances
+        assert "B" in mean_distances
+
+        # Check that log file was created
+        log_file = os.path.join(log_dir, "com_distance.csv")
+        assert os.path.exists(log_file)
+
+        # Check log file content
+        df = pd.read_csv(log_file)
+
+        # Should have the right columns
+        assert "filepath_1" in df.columns
+        assert "filepath_2" in df.columns
+        assert "chain_A_distance" in df.columns
+        assert "chain_B_distance" in df.columns
+
+        # Number of rows should match the number of pairwise combinations
+        import math
+
+        expected_rows = math.comb(len(file_paths), 2)
+        assert len(df) == expected_rows
+
+    def test_with_different_atom_types(self, antibody_antigen_pdb_files):
+        """Test mean COM calculation with different atom types."""
+        file_paths = antibody_antigen_pdb_files
+
+        # Calculate with CA atoms (default)
+        ca_distances = mean_COM_distance(file_paths, ["A", "B"])
+
+        # Calculate with CB atoms
+        cb_distances = mean_COM_distance(file_paths, ["A", "B"], atom_types=["CB"])
+
+        # Both should return values for both chains
+        assert "A" in ca_distances and "B" in ca_distances
+        assert "A" in cb_distances and "B" in cb_distances
+
+        # Using different atom types should generally give different results
+        assert (
+            ca_distances["A"] != cb_distances["A"]
+            or ca_distances["B"] != cb_distances["B"]
+        )
