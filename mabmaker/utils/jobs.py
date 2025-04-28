@@ -3,8 +3,10 @@
 # SPDX-License-Identifier: MIT
 
 
+import os
 import queue
 import subprocess as sp
+import sys
 from typing import Callable, Iterable
 
 import torch
@@ -44,6 +46,16 @@ def gpu_worker(
     finally:
         gpu_queue.put(gpu_id)
     return result
+
+
+def silence_worker():
+    """
+    Silence the stdout and stderr of the current process. Designed to be used as an initializer for
+    a `concurrent.futures.ProcessPoolExecutor`.
+    """
+    devnull = open(os.devnull, "w")
+    sys.stdout = devnull
+    sys.stderr = devnull
 
 
 def get_gpu_queue(gpus: int | Iterable[int | str] | str | None = None) -> queue.Queue:

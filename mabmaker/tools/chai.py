@@ -13,7 +13,7 @@ from chai_lab.chai1 import run_inference
 from tqdm.auto import tqdm
 
 from ..utils.inputs import setup_structure_prediction_run
-from ..utils.jobs import get_gpu_queue, gpu_worker
+from ..utils.jobs import get_gpu_queue, gpu_worker, silence_worker
 from ..utils.outputs import process_chai_output
 
 __all__ = ["chai"]
@@ -104,7 +104,9 @@ def chai(
     # run predictions
     futures = []
     output_paths = []
-    with cf.ThreadPoolExecutor(max_workers=num_gpus) as executor:
+    with cf.ThreadPoolExecutor(
+        max_workers=num_gpus, initializer=silence_worker
+    ) as executor:
         for run in runs:
             run_output_path = os.path.join(output_path, run.name, "raw_output")
             fasta_path, constraint_path = run.build_chai_input(run_output_path)
