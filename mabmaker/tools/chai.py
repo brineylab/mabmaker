@@ -108,10 +108,10 @@ def chai(
     output_paths = []
     # stdout = sys.stdout
     # stderr = sys.stderr
-    with cf.ThreadPoolExecutor(
+    with cf.ProcessPoolExecutor(
         max_workers=num_gpus,
         initializer=silence_worker,
-        mp_context=mp.get_context("spawn"),
+        # mp_context=mp.get_context("spawn"),
     ) as executor:
         for run in runs:
             run_output_path = os.path.join(output_path, run.name, "raw_output")
