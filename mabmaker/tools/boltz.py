@@ -5,6 +5,7 @@
 
 import concurrent.futures as cf
 import os
+import sys
 from typing import Iterable
 
 import abutils
@@ -108,9 +109,7 @@ def boltz(
     # run predictions
     futures = []
     output_paths = []
-    with cf.ThreadPoolExecutor(
-        max_workers=num_gpus, initializer=silence_worker
-    ) as executor:
+    with cf.ThreadPoolExecutor(max_workers=num_gpus) as executor:
         for run in runs:
             run_output_path = os.path.join(output_path, run.name, "raw_output")
             # Boltz accepts a single seed, so we need a separate job for each seed
