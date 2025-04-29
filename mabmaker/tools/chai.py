@@ -159,10 +159,6 @@ def chai(
             for _ in cf.as_completed(futures):
                 pbar.update(1)
 
-    # restore stdout and stderr
-    sys.stdout = stdout
-    sys.stderr = stderr
-
     # process outputs
     run_idx = 0
     for run in runs:
@@ -181,6 +177,10 @@ def chai(
     # stdout and stderr logs
     stdout_logs = sys.stdout.get_logs()
     stderr_logs = sys.stderr.get_logs()
+
+    # restore stdout and stderr
+    sys.stdout = stdout
+    sys.stderr = stderr
 
     # example: dump everything to a file
     with open(os.path.join(output_path, "stdout.log"), "w") as fh:
