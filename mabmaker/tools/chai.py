@@ -168,15 +168,13 @@ def chai(
     for run in runs:
         for seed in run.seeds:
             run_path = output_paths[run_idx]
-            result, stdout, stderr = futures[run_idx].result()
+            result = futures[run_idx].result()
             process_chai_output(
                 result=result,
                 original_path=run_path,
                 processed_path=os.path.join(output_path, run.name),
                 run_name=run.name,
                 seed=seed,
-                # stdout=stdout,
-                # stderr=stderr,
             )
             run_idx += 1
 
