@@ -496,7 +496,7 @@ def ligandmpnn(
         # monitor progress
         with tqdm(
             total=len(futures),
-            desc="LigandMPNN",
+            desc="LigandMPNN: ",
             bar_format="{desc}{percentage:3.0f}%|{bar:25}{r_bar}",
         ) as pbar:
             for _ in concurrent.futures.as_completed(futures):

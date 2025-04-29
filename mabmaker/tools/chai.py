@@ -157,7 +157,7 @@ def chai(
         # sys.stderr = stderr
         with tqdm(
             total=len(futures),
-            desc="Chai-1",
+            desc="Chai-1: ",
             bar_format="{desc}{percentage:3.0f}%|{bar:25}{r_bar}",
         ) as pbar:
             for _ in cf.as_completed(futures):
