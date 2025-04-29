@@ -7,6 +7,7 @@ import os
 import queue
 import subprocess as sp
 import sys
+import threading
 from typing import Callable, Iterable
 
 import torch
@@ -56,6 +57,24 @@ def silence_worker():
     devnull = open(os.devnull, "w")
     sys.stdout = devnull
     sys.stderr = devnull
+
+
+class ThreadSilencer:
+    def __init__(self, real_stream, main_thread):
+        self._real = real_stream
+        self._main = main_thread
+
+    # -- File-like protocol ------------------------------------------------
+    def write(self, data):
+        if threading.current_thread() is self._main:
+            self._real.write(data)
+
+    def flush(self):
+        if threading.current_thread() is self._main:
+            self._real.flush()
+
+    def __getattr__(self, name):  # isatty, fileno, etc.
+        return getattr(self._real, name)
 
 
 def get_gpu_queue(gpus: int | Iterable[int | str] | str | None = None) -> queue.Queue:
