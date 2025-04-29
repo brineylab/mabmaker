@@ -4,6 +4,7 @@
 
 
 import concurrent.futures as cf
+import multiprocessing as mp
 import os
 import sys
 from functools import partial
@@ -105,11 +106,12 @@ def chai(
     # run predictions
     futures = []
     output_paths = []
-    stdout = sys.stdout
-    stderr = sys.stderr
+    # stdout = sys.stdout
+    # stderr = sys.stderr
     with cf.ThreadPoolExecutor(
         max_workers=num_gpus,
         initializer=silence_worker,
+        mp_context=mp.get_context("spawn"),
     ) as executor:
         for run in runs:
             run_output_path = os.path.join(output_path, run.name, "raw_output")
@@ -137,8 +139,8 @@ def chai(
                 output_paths.append(_output_path)
 
         # monitor progress
-        sys.stdout = stdout
-        sys.stderr = stderr
+        # sys.stdout = stdout
+        # sys.stderr = stderr
         with tqdm(
             total=len(futures),
             desc="Chai-1",
