@@ -11,4 +11,4 @@ tqdm
 # models
 boltz
 chai_lab
-protenix
+# protenix
