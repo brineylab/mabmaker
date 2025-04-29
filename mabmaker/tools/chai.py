@@ -5,6 +5,7 @@
 
 import concurrent.futures as cf
 import os
+import sys
 from functools import partial
 from pathlib import Path
 from typing import Iterable
@@ -104,6 +105,8 @@ def chai(
     # run predictions
     futures = []
     output_paths = []
+    stdout = sys.stdout
+    stderr = sys.stderr
     with cf.ThreadPoolExecutor(
         max_workers=num_gpus, initializer=silence_worker
     ) as executor:
@@ -133,6 +136,8 @@ def chai(
                 output_paths.append(_output_path)
 
     # monitor progress
+    sys.stdout = stdout
+    sys.stderr = stderr
     with tqdm(
         total=len(futures),
         desc="Chai-1",
