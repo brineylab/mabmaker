@@ -50,12 +50,11 @@ def gpu_worker(
     return result
 
 
-def quiet_worker(
-    fn,
-    *args,
+def quiet_gpu_worker(
+    cmd: str | Callable,
+    gpu_queue: queue.Queue,
     return_stdout: bool = False,
     return_stderr: bool = False,
-    **kwargs,
 ):
     """
     Redirect the stdout and stderr of the current process to an in-memory buffer. If desirted,
@@ -95,7 +94,15 @@ def quiet_worker(
     stdout = io.StringIO()
     stderr = io.StringIO()
     with redirect_stdout(stdout), redirect_stderr(stderr):
-        result = fn(*args, **kwargs)
+        gpu_id = gpu_queue.get()
+        try:
+            if isinstance(cmd, str):
+                cmd = f"CUDA_VISIBLE_DEVICES={gpu_id} {cmd}"
+                result = sp.run(cmd, shell=True, stdout=sp.PIPE, stderr=sp.PIPE)
+            else:
+                result = cmd(device=f"cuda:{gpu_id}")
+        finally:
+            gpu_queue.put(gpu_id)
     # if not returning stdout or stderr, return the result as a single item (not a tuple)
     if not return_stdout and not return_stderr:
         return result
