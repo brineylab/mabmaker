@@ -18,7 +18,7 @@ from chai_lab.chai1 import run_inference
 from tqdm.auto import tqdm
 
 from ..utils.inputs import setup_structure_prediction_run
-from ..utils.jobs import SubThreadSilencer, get_gpu_queue, gpu_worker, quiet_gpu_worker
+from ..utils.jobs import SubThreadSilencer, get_gpu_queue, gpu_worker
 from ..utils.outputs import process_chai_output
 
 warnings.filterwarnings("ignore", category=DeprecationWarning)
@@ -109,8 +109,9 @@ def chai(
     num_gpus = gpu_queue.qsize()
 
     # silence stdout and stderr for all threads except the main thread
-    stdout = sys.stdout
-    stderr = sys.stderr
+    # because Chai-1 prints a lot of stuff to stdout and stderr
+    original_stdout = sys.stdout
+    original_stderr = sys.stderr
     main_thread = threading.current_thread()
     sys.stdout = SubThreadSilencer(sys.stdout, main_thread)
     sys.stderr = SubThreadSilencer(sys.stderr, main_thread)
@@ -146,15 +147,11 @@ def chai(
                         gpu_worker,
                         cmd,
                         gpu_queue,
-                        # return_stdout=True,
-                        # return_stderr=True,
                     )
                 )
                 output_paths.append(_output_path)
 
         # monitor progress
-        # sys.stdout = stdout
-        # sys.stderr = stderr
         with tqdm(
             total=len(futures),
             desc="Chai-1: ",
@@ -183,8 +180,8 @@ def chai(
     stderr_logs = sys.stderr.get_logs()
 
     # restore stdout and stderr
-    sys.stdout = stdout
-    sys.stderr = stderr
+    sys.stdout = original_stdout
+    sys.stderr = original_stderr
 
     # write stdout and stderr logs
     log_path = os.path.join(output_path, "logs")
