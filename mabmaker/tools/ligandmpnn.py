@@ -7,6 +7,7 @@ import json
 import os
 import re
 import shutil
+import warnings
 
 # import subprocess as sp
 from dataclasses import dataclass
@@ -20,6 +21,8 @@ from natsort import natsorted
 from tqdm.auto import tqdm
 
 from ..utils.jobs import get_gpu_queue, gpu_worker
+
+warnings.filterwarnings("ignore", category=DeprecationWarning)
 
 __all__ = ["ligandmpnn", "expand_residue_ranges"]
 

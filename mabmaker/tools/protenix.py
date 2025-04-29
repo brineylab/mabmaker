@@ -5,6 +5,7 @@
 
 import concurrent.futures as cf
 import os
+import warnings
 from typing import Iterable
 
 import abutils
@@ -13,6 +14,8 @@ from tqdm.auto import tqdm
 from ..utils.inputs import StructurePredictionRun, setup_structure_prediction_run
 from ..utils.jobs import get_gpu_queue, gpu_worker
 from ..utils.outputs import process_protenix_output
+
+warnings.filterwarnings("ignore", category=DeprecationWarning)
 
 PROTENIX_DIR = os.path.abspath(
     os.path.join(os.path.dirname(os.path.dirname(__file__)), "models", "Protenix")

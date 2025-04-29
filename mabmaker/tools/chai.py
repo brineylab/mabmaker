@@ -8,6 +8,7 @@ import multiprocessing as mp
 import os
 import sys
 import threading
+import warnings
 from functools import partial
 from pathlib import Path
 from typing import Iterable
@@ -18,6 +19,8 @@ from tqdm.auto import tqdm
 from ..utils.inputs import setup_structure_prediction_run
 from ..utils.jobs import SubThreadSilencer, get_gpu_queue, gpu_worker, quiet_gpu_worker
 from ..utils.outputs import process_chai_output
+
+warnings.filterwarnings("ignore", category=DeprecationWarning)
 
 __all__ = ["chai"]
 
