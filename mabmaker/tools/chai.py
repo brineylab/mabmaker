@@ -16,7 +16,7 @@ from chai_lab.chai1 import run_inference
 from tqdm.auto import tqdm
 
 from ..utils.inputs import setup_structure_prediction_run
-from ..utils.jobs import ThreadSilencer, get_gpu_queue, gpu_worker, silence_worker
+from ..utils.jobs import ThreadSilencer, get_gpu_queue, gpu_worker, quiet_worker
 from ..utils.outputs import process_chai_output
 
 __all__ = ["chai"]
@@ -104,17 +104,15 @@ def chai(
     gpu_queue = get_gpu_queue(gpus)
     num_gpus = gpu_queue.qsize()
 
+    # # silence stdout and stderr for all threads except the main thread
+    # main_thread = threading.current_thread()
+    # sys.stdout = ThreadSilencer(sys.stdout, main_thread)
+    # sys.stderr = ThreadSilencer(sys.stderr, main_thread)
+
     # run predictions
     futures = []
     output_paths = []
-    main_thread = threading.current_thread()
-    sys.stdout = ThreadSilencer(sys.stdout, main_thread)
-    sys.stderr = ThreadSilencer(sys.stderr, main_thread)
-    with cf.ThreadPoolExecutor(
-        max_workers=num_gpus,
-        # initializer=silence_worker,
-        # mp_context=mp.get_context("spawn"),
-    ) as executor:
+    with cf.ThreadPoolExecutor(max_workers=num_gpus) as executor:
         for run in runs:
             run_output_path = os.path.join(output_path, run.name, "raw_output")
             fasta_path, constraint_path = run.build_chai_input(run_output_path)
@@ -137,7 +135,16 @@ def chai(
                     num_diffusion_samples=num_diffusion_samples,
                     low_memory=low_memory,
                 )
-                futures.append(executor.submit(gpu_worker, cmd, gpu_queue))
+                futures.append(
+                    executor.submit(
+                        quiet_worker,
+                        gpu_worker,
+                        cmd,
+                        gpu_queue,
+                        return_stdout=True,
+                        return_stderr=True,
+                    )
+                )
                 output_paths.append(_output_path)
 
         # monitor progress
@@ -156,13 +163,15 @@ def chai(
     for run in runs:
         for seed in run.seeds:
             run_path = output_paths[run_idx]
-            result = futures[run_idx].result()
+            result, stdout, stderr = futures[run_idx].result()
             process_chai_output(
                 result=result,
                 original_path=run_path,
                 processed_path=os.path.join(output_path, run.name),
                 run_name=run.name,
                 seed=seed,
+                stdout=stdout,
+                stderr=stderr,
             )
             run_idx += 1
 

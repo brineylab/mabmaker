@@ -2,12 +2,13 @@
 # Distributed under the terms of the MIT License.
 # SPDX-License-Identifier: MIT
 
-
+import io
 import os
 import queue
 import subprocess as sp
 import sys
 import threading
+from contextlib import redirect_stderr, redirect_stdout
 from typing import Callable, Iterable
 
 import torch
@@ -49,28 +50,96 @@ def gpu_worker(
     return result
 
 
-def silence_worker():
+def quiet_worker(
+    fn,
+    *args,
+    return_stdout: bool = False,
+    return_stderr: bool = False,
+    **kwargs,
+):
     """
-    Silence the stdout and stderr of the current process. Designed to be used as an initializer for
-    a `concurrent.futures.ProcessPoolExecutor`.
+    Redirect the stdout and stderr of the current process to an in-memory buffer. If desirted,
+    return the stdout and stderr as strings together with the result.
+
+    Parameters
+    ----------
+    fn : callable
+        The function to run.
+
+    *args : tuple
+        The arguments to pass to the function.
+
+    return_stdout : bool, optional
+        If ``True``, return the stdout as a string.
+
+    return_stderr : bool, optional
+        If ``True``, return the stderr as a string.
+
+    **kwargs : dict
+        Keyword arguments to pass to the function.
+
+    Returns
+    -------
+    result : object
+        The result of the function. Note that if ``return_stdout`` and ``return_stderr`` are both ``False``,
+        the result will be returned as a single item (not a tuple). If either ``return_stdout`` or ``return_stderr``
+        are ``True``, the result will be returned as a tuple containing the result and the stdout and/or stderr.
+
+    stdout : str, optional
+        The stdout of the function.
+
+    stderr : str, optional
+        The stderr of the function.
+
     """
-    devnull = open(os.devnull, "w")
-    sys.stdout = devnull
-    sys.stderr = devnull
+    stdout = io.StringIO()
+    stderr = io.StringIO()
+    with redirect_stdout(stdout), redirect_stderr(stderr):
+        result = fn(*args, **kwargs)
+    # if not returning stdout or stderr, return the result as a single item (not a tuple)
+    if not return_stdout and not return_stderr:
+        return result
+    # otherwise, return a tuple of the result and the stdout and/or stderr
+    result = (result,)
+    if return_stdout:
+        result += (stdout.getvalue(),)
+    if return_stderr:
+        result += (stderr.getvalue(),)
+    return result
 
 
 class ThreadSilencer:
-    def __init__(self, real_stream, main_thread):
+    def __init__(
+        self,
+        real_stream,
+        exempt_threads: threading.Thread | Iterable[threading.Thread],
+    ):
+        """
+        Silence a stream (e.g. ``sys.stdout``) for all threads except for the "exempt" threads specified.
+
+        Parameters
+        ----------
+        real_stream : io.TextIOWrapper
+            The stream to silence.
+
+        exempt_threads : threading.Thread | Iterable[threading.Thread]
+            The threads to exempt from being silenced. Typically the main thread.
+
+        """
         self._real = real_stream
-        self._main = main_thread
+        self._exempt = (
+            [exempt_threads]
+            if isinstance(exempt_threads, threading.Thread)
+            else exempt_threads
+        )
 
     # -- File-like protocol ------------------------------------------------
     def write(self, data):
-        if threading.current_thread() is self._main:
+        if threading.current_thread() in self._exempt:
             self._real.write(data)
 
     def flush(self):
-        if threading.current_thread() is self._main:
+        if threading.current_thread() in self._exempt:
             self._real.flush()
 
     def __getattr__(self, name):  # isatty, fileno, etc.

@@ -160,6 +160,8 @@ def process_chai_output(
     processed_path: str,
     run_name: str,
     seed: int | str,
+    stdout: str | None = None,
+    stderr: str | None = None,
 ) -> None:
     """
     Process the outputs of a Chai-1 prediction. The predictions and confidence scores
@@ -189,6 +191,7 @@ def process_chai_output(
     predictions_path = _get_predictions_path(processed_path)
     metrics_path = _get_metrics_path(processed_path)
     msas_path = _get_msas_path(processed_path)
+    logs_path = _get_logs_path(processed_path)
 
     # copy predictions
     for model_path in glob.glob(os.path.join(original_path, "pred.model_idx_*.cif")):
@@ -239,6 +242,15 @@ def process_chai_output(
         os.path.join(original_path, "msa_depth.pdf"),
         os.path.join(msas_path, seed, "msa_depth.pdf"),
     )
+
+    # write logs
+    abutils.io.make_dir(os.path.join(logs_path, seed))
+    if stdout is not None:
+        with open(os.path.join(logs_path, seed, "stdout.log"), "w") as f:
+            f.write(stdout)
+    if stderr is not None:
+        with open(os.path.join(logs_path, seed, "stderr.log"), "w") as f:
+            f.write(stderr)
 
 
 def process_protenix_output(
