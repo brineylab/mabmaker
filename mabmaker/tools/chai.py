@@ -16,7 +16,7 @@ from chai_lab.chai1 import run_inference
 from tqdm.auto import tqdm
 
 from ..utils.inputs import setup_structure_prediction_run
-from ..utils.jobs import SubThreadSilencer, get_gpu_queue, quiet_gpu_worker
+from ..utils.jobs import SubThreadSilencer, get_gpu_queue, gpu_worker, quiet_gpu_worker
 from ..utils.outputs import process_chai_output
 
 __all__ = ["chai"]
@@ -139,11 +139,11 @@ def chai(
                 )
                 futures.append(
                     executor.submit(
-                        quiet_gpu_worker,
+                        gpu_worker,
                         cmd,
                         gpu_queue,
-                        return_stdout=True,
-                        return_stderr=True,
+                        # return_stdout=True,
+                        # return_stderr=True,
                     )
                 )
                 output_paths.append(_output_path)
