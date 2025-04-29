@@ -36,10 +36,10 @@ def setup_structure_prediction_run(
         json_paths = [
             f
             for f in abutils.list_files(json_path)
-            if magika.identify_path(Path(f)).output.ct_label == "json"
+            if magika.identify_path(Path(f)).output.label == "json"
         ]
     else:
-        if not magika.identify_path(Path(json_path)).output.ct_label == "json":
+        if not magika.identify_path(Path(json_path)).output.label == "json":
             raise ValueError(
                 f"supplied JSON file does not appear to be a JSON file: {json_path}"
             )
@@ -493,10 +493,10 @@ class StructurePredictionInput:
 
         # input parsing
         magika = Magika()
-        if magika.identify_path(Path(input_path)).output.ct_label == "yaml":
+        if magika.identify_path(Path(input_path)).output.label == "yaml":
             with open(input_path, "r") as f:
                 self.input_data = yaml.load_all(f)
-        elif magika.identify_path(Path(input_path)).output.ct_label == "json":
+        elif magika.identify_path(Path(input_path)).output.label == "json":
             with open(input_path, "r") as f:
                 self.input_data = json.load(f)
         else:
