@@ -132,14 +132,14 @@ def chai(
                 futures.append(executor.submit(gpu_worker, cmd, gpu_queue))
                 output_paths.append(_output_path)
 
-        # monitor progress
-        with tqdm(
-            total=len(futures),
-            desc="Chai-1",
-            bar_format="{desc}{percentage:3.0f}%|{bar:25}{r_bar}",
-        ) as pbar:
-            for _ in cf.as_completed(futures):
-                pbar.update(1)
+    # monitor progress
+    with tqdm(
+        total=len(futures),
+        desc="Chai-1",
+        bar_format="{desc}{percentage:3.0f}%|{bar:25}{r_bar}",
+    ) as pbar:
+        for _ in cf.as_completed(futures):
+            pbar.update(1)
 
     # process outputs
     run_idx = 0
