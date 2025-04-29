@@ -13,6 +13,7 @@ from functools import partial
 from pathlib import Path
 from typing import Iterable
 
+import abutils
 from chai_lab.chai1 import run_inference
 from tqdm.auto import tqdm
 
@@ -185,11 +186,13 @@ def chai(
     sys.stdout = stdout
     sys.stderr = stderr
 
-    # example: dump everything to a file
-    with open(os.path.join(output_path, "stdout.log"), "w") as fh:
+    # write stdout and stderr logs
+    log_path = os.path.join(output_path, "logs")
+    abutils.io.make_dir(log_path)
+    with open(os.path.join(log_path, "stdout.log"), "w") as fh:
         for tid, text in stdout_logs.items():
             fh.write(f"--- output from thread {tid} ---\n{text}\n")
-    with open(os.path.join(output_path, "stderr.log"), "w") as fh:
+    with open(os.path.join(log_path, "stderr.log"), "w") as fh:
         for tid, text in stderr_logs.items():
             fh.write(f"--- output from thread {tid} ---\n{text}\n")
 
