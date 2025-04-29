@@ -115,42 +115,94 @@ def quiet_gpu_worker(
     return result
 
 
-class ThreadSilencer:
-    def __init__(
-        self,
-        real_stream,
-        exempt_threads: threading.Thread | Iterable[threading.Thread],
-    ):
-        """
-        Silence a stream (e.g. ``sys.stdout``) for all threads except for the "exempt" threads specified.
+# class ThreadSilencer:
+#     def __init__(
+#         self,
+#         real_stream,
+#         exempt_threads: threading.Thread | Iterable[threading.Thread],
+#     ):
+#         """
+#         Silence a stream (e.g. ``sys.stdout``) for all threads except for the "exempt" threads specified.
 
-        Parameters
-        ----------
-        real_stream : io.TextIOWrapper
-            The stream to silence.
+#         Parameters
+#         ----------
+#         real_stream : io.TextIOWrapper
+#             The stream to silence.
 
-        exempt_threads : threading.Thread | Iterable[threading.Thread]
-            The threads to exempt from being silenced. Typically the main thread.
+#         exempt_threads : threading.Thread | Iterable[threading.Thread]
+#             The threads to exempt from being silenced. Typically the main thread.
 
-        """
-        self._real = real_stream
-        self._exempt = (
-            [exempt_threads]
-            if isinstance(exempt_threads, threading.Thread)
-            else exempt_threads
-        )
+#         """
+#         self._real = real_stream
+#         self._exempt = (
+#             [exempt_threads]
+#             if isinstance(exempt_threads, threading.Thread)
+#             else exempt_threads
+#         )
 
-    # -- File-like protocol ------------------------------------------------
+#     # -- File-like protocol ------------------------------------------------
+#     def write(self, data):
+#         if threading.current_thread() in self._exempt:
+#             self._real.write(data)
+
+#     def flush(self):
+#         if threading.current_thread() in self._exempt:
+#             self._real.flush()
+
+#     def __getattr__(self, name):  # isatty, fileno, etc.
+#         return getattr(self._real, name)
+
+
+class SubThreadSilencer:
+    """
+    Forward writes from the main thread to the real stream,
+    but capture writes from worker threads in an in-memory buffer.
+    """
+
+    def __init__(self, real_stream: io.TextIOWrapper, main_thread: threading.Thread):
+        self._real = real_stream  # the real sys.stdout / sys.stderr
+        self._main = main_thread  # usually threading.current_thread()
+        self._local = threading.local()  # per-thread storage for buffers
+        self._all_buffers = {}  # {thread_id: StringIO}
+
+    # ------------------------------------------------------------------ file-like API
     def write(self, data):
-        if threading.current_thread() in self._exempt:
+        if threading.current_thread() is self._main:
             self._real.write(data)
+        else:  # worker thread
+            buf = self._get_buffer()
+            buf.write(data)
 
     def flush(self):
-        if threading.current_thread() in self._exempt:
+        if threading.current_thread() is self._main:
             self._real.flush()
+        # workers don't need flushing; StringIO keeps everything in RAM
 
-    def __getattr__(self, name):  # isatty, fileno, etc.
+    # let tqdm / logging / others ask for fileno, isatty, encoding, …
+    def __getattr__(self, name):
         return getattr(self._real, name)
+
+    # ------------------------------------------------------------------ helpers
+    def _get_buffer(self):
+        """Return (and create if needed) this thread's capture buffer."""
+        buf = getattr(self._local, "buf", None)
+        if buf is None:
+            buf = io.StringIO()
+            self._local.buf = buf
+            self._all_buffers[threading.get_ident()] = buf
+        return buf
+
+    def get_logs(self, thread_id=None):
+        """
+        Return the captured text.
+
+        • If *thread_id* is None, returns {id: text, …} for every thread.
+        • Otherwise returns only the text for the chosen thread (or '').
+        """
+        if thread_id is None:
+            return {tid: b.getvalue() for tid, b in self._all_buffers.items()}
+        buf = self._all_buffers.get(thread_id)
+        return "" if buf is None else buf.getvalue()
 
 
 def get_gpu_queue(gpus: int | Iterable[int | str] | str | None = None) -> queue.Queue:

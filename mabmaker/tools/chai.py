@@ -16,7 +16,7 @@ from chai_lab.chai1 import run_inference
 from tqdm.auto import tqdm
 
 from ..utils.inputs import setup_structure_prediction_run
-from ..utils.jobs import get_gpu_queue, quiet_gpu_worker
+from ..utils.jobs import SubThreadSilencer, get_gpu_queue, quiet_gpu_worker
 from ..utils.outputs import process_chai_output
 
 __all__ = ["chai"]
@@ -104,10 +104,12 @@ def chai(
     gpu_queue = get_gpu_queue(gpus)
     num_gpus = gpu_queue.qsize()
 
-    # # silence stdout and stderr for all threads except the main thread
-    # main_thread = threading.current_thread()
-    # sys.stdout = ThreadSilencer(sys.stdout, main_thread)
-    # sys.stderr = ThreadSilencer(sys.stderr, main_thread)
+    # silence stdout and stderr for all threads except the main thread
+    stdout = sys.stdout
+    stderr = sys.stderr
+    main_thread = threading.current_thread()
+    sys.stdout = SubThreadSilencer(sys.stdout, main_thread)
+    sys.stderr = SubThreadSilencer(sys.stderr, main_thread)
 
     # run predictions
     futures = []
@@ -157,6 +159,10 @@ def chai(
             for _ in cf.as_completed(futures):
                 pbar.update(1)
 
+    # restore stdout and stderr
+    sys.stdout = stdout
+    sys.stderr = stderr
+
     # process outputs
     run_idx = 0
     for run in runs:
@@ -169,10 +175,22 @@ def chai(
                 processed_path=os.path.join(output_path, run.name),
                 run_name=run.name,
                 seed=seed,
-                stdout=stdout,
-                stderr=stderr,
+                # stdout=stdout,
+                # stderr=stderr,
             )
             run_idx += 1
+
+    # stdout and stderr logs
+    stdout_logs = sys.stdout.get_logs()
+    stderr_logs = sys.stderr.get_logs()
+
+    # example: dump everything to a file
+    with open(os.path.join(output_path, "stdout.log"), "w") as fh:
+        for tid, text in stdout_logs.items():
+            fh.write(f"--- output from thread {tid} ---\n{text}\n")
+    with open(os.path.join(output_path, "stderr.log"), "w") as fh:
+        for tid, text in stderr_logs.items():
+            fh.write(f"--- output from thread {tid} ---\n{text}\n")
 
 
 def _build_chai_command(
