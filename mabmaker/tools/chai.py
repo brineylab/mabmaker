@@ -105,10 +105,11 @@ def chai(
     # run predictions
     futures = []
     output_paths = []
-    stdout = sys.stdout
-    stderr = sys.stderr
+    # stdout = sys.stdout
+    # stderr = sys.stderr
     with cf.ThreadPoolExecutor(
-        max_workers=num_gpus, initializer=silence_worker
+        max_workers=num_gpus,
+        # initializer=silence_worker,
     ) as executor:
         for run in runs:
             run_output_path = os.path.join(output_path, run.name, "raw_output")
@@ -135,16 +136,16 @@ def chai(
                 futures.append(executor.submit(gpu_worker, cmd, gpu_queue))
                 output_paths.append(_output_path)
 
-    # monitor progress
-    sys.stdout = stdout
-    sys.stderr = stderr
-    with tqdm(
-        total=len(futures),
-        desc="Chai-1",
-        bar_format="{desc}{percentage:3.0f}%|{bar:25}{r_bar}",
-    ) as pbar:
-        for _ in cf.as_completed(futures):
-            pbar.update(1)
+        # monitor progress
+        # sys.stdout = stdout
+        # sys.stderr = stderr
+        with tqdm(
+            total=len(futures),
+            desc="Chai-1",
+            bar_format="{desc}{percentage:3.0f}%|{bar:25}{r_bar}",
+        ) as pbar:
+            for _ in cf.as_completed(futures):
+                pbar.update(1)
 
     # process outputs
     run_idx = 0
