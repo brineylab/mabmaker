@@ -5,6 +5,7 @@
 
 import concurrent.futures as cf
 import os
+import shutil
 import warnings
 from typing import Iterable
 
@@ -35,6 +36,7 @@ def protenix(
     num_trunk_recycles: int = 4,
     num_diffusion_timesteps: int = 200,
     num_diffusion_samples: int = 5,
+    compress_output: bool = False,
 ) -> None:
     """
     Structure prediction with `Protenix`_.
@@ -85,6 +87,11 @@ def protenix(
 
     num_diffusion_samples : int, optional, default=5
         The number of diffusion samples to generate.
+
+    compress_output : bool, optional, default=False
+        Whether to compress the output directory. If `True`, the output directory will
+        be compressed into a gzipped tarball with the extension ``.tar.gz`` and located
+        in the output directory.
 
     .. _Protenix: https://github.com/bytedance/Protenix
     .. _AlphaFold3 input JSON file: https://github.com/google-deepmind/alphafold/tree/main/server
@@ -144,6 +151,15 @@ def protenix(
             stdout=stdout,
             stderr=stderr,
         )
+
+    # compress output
+    if compress_output:
+        for run in runs:
+            shutil.make_archive(
+                base_name=os.path.join(output_path, run.name),
+                format="gztar",
+                root_dir=os.path.join(output_path, run.name),
+            )
 
 
 def _build_protenix_command(

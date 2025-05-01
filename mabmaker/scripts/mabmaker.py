@@ -263,6 +263,11 @@ def ligandmpnn(
     default=5,
     help="The number of diffusion samples to generate.",
 )
+@click.option(
+    "--compress_output/--no_compress_output",
+    default=False,
+    help="Whether to compress the output directory.",
+)
 def protenix(
     json_path: str,
     output_path: str,
@@ -274,6 +279,7 @@ def protenix(
     num_trunk_recycles: int = 4,
     num_diffusion_timesteps: int = 200,
     num_diffusion_samples: int = 5,
+    compress_output: bool = False,
 ) -> None:
     """
     Structure prediction with Protenix.
@@ -289,6 +295,7 @@ def protenix(
         num_trunk_recycles=num_trunk_recycles,
         num_diffusion_timesteps=num_diffusion_timesteps,
         num_diffusion_samples=num_diffusion_samples,
+        compress_output=compress_output,
     )
 
 
@@ -387,6 +394,11 @@ def protenix(
     default=False,
     help="Whether to use low memory mode.",
 )
+@click.option(
+    "--compress_output/--no_compress_output",
+    default=False,
+    help="Whether to compress the output directory.",
+)
 def chai(
     json_path: str,
     output_path: str,
@@ -404,6 +416,7 @@ def chai(
     num_diffusion_timesteps: int = 200,
     num_diffusion_samples: int = 5,
     low_memory: bool = False,
+    compress_output: bool = False,
 ) -> None:
     """
     Structure prediction with Chai-1.
@@ -425,6 +438,7 @@ def chai(
         num_diffusion_timesteps=num_diffusion_timesteps,
         num_diffusion_samples=num_diffusion_samples,
         low_memory=low_memory,
+        compress_output=compress_output,
     )
 
 
@@ -527,6 +541,11 @@ def chai(
     default="~/.boltz",
     help="The path to the cache directory, which contains model weights and other resources.",
 )
+@click.option(
+    "--compress_output/--no_compress_output",
+    default=False,
+    help="Whether to compress the output directory.",
+)
 def boltz(
     json_path: str,
     output_path: str,
@@ -545,6 +564,7 @@ def boltz(
     write_full_pae: bool = True,
     write_full_pde: bool = True,
     cache: str = "~/.boltz",
+    compress_output: bool = False,
 ) -> None:
     """
     Structure prediction with Boltz-1.
@@ -567,4 +587,5 @@ def boltz(
         write_full_pae=write_full_pae,
         write_full_pde=write_full_pde,
         cache=cache,
+        compress_output=compress_output,
     )

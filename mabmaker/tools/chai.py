@@ -6,6 +6,7 @@
 import concurrent.futures as cf
 import multiprocessing as mp
 import os
+import shutil
 import sys
 import threading
 import warnings
@@ -43,6 +44,7 @@ def chai(
     num_diffusion_timesteps: int = 200,
     num_diffusion_samples: int = 5,
     low_memory: bool = False,
+    compress_output: bool = False,
 ) -> None:
     """
     Structure prediction with `Chai-1`_.
@@ -107,6 +109,11 @@ def chai(
 
     low_memory : bool, optional, default=False
         Whether to use low memory mode.
+
+    compress_output : bool, optional, default=False
+        Whether to compress the output directory. If `True`, the output directory will
+        be compressed into a gzipped tarball with the extension ``.tar.gz`` and located
+        in the output directory.
 
     .. _Chai-1: https://github.com/chaidiscovery/chai-lab/tree/main?tab=readme-ov-file
     .. _AlphaFold3 input JSON file: https://github.com/google-deepmind/alphafold/tree/main/server
@@ -214,6 +221,15 @@ def chai(
     with open(os.path.join(log_path, "stderr.log"), "w") as fh:
         for tid, text in stderr_logs.items():
             fh.write(f"--- output from thread {tid} ---\n{text}\n")
+
+    # compress output
+    if compress_output:
+        for run in runs:
+            shutil.make_archive(
+                base_name=os.path.join(output_path, run.name),
+                format="gztar",
+                root_dir=os.path.join(output_path, run.name),
+            )
 
 
 def _build_chai_command(

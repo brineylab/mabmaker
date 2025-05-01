@@ -5,6 +5,7 @@
 
 import concurrent.futures as cf
 import os
+import shutil
 import warnings
 from typing import Iterable
 
@@ -38,6 +39,7 @@ def boltz(
     write_full_pae: bool = True,
     write_full_pde: bool = True,
     cache: str = "~/.boltz",
+    compress_output: bool = False,
 ) -> None:
     """
     Structure prediction with `Boltz-1`_.
@@ -107,6 +109,11 @@ def boltz(
 
     cache : str, optional, default="~/.boltz"
         The path to the cache directory, which contains model weights and other resources.
+
+    compress_output : bool, optional, default=False
+        Whether to compress the output directory. If `True`, the output directory will
+        be compressed into a gzipped tarball with the extension ``.tar.gz`` and located
+        in the output directory.
 
     .. _Boltz-1: https://github.com/jwohlwend/boltz
     .. _AlphaFold3 input JSON file: https://github.com/google-deepmind/alphafold/tree/main/server
@@ -182,6 +189,14 @@ def boltz(
                 stderr=stderr,
             )
             run_idx += 1
+
+        # compress output
+        if compress_output:
+            shutil.make_archive(
+                base_name=os.path.join(output_path, run.name),
+                format="gztar",
+                root_dir=os.path.join(output_path, run.name),
+            )
 
 
 def _build_boltz_command(
