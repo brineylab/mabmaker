@@ -5,11 +5,9 @@
 
 import concurrent.futures as cf
 import os
-import sys
 import warnings
 from typing import Iterable
 
-import abutils
 from tqdm.auto import tqdm
 
 from ..utils.inputs import StructurePredictionRun, setup_structure_prediction_run

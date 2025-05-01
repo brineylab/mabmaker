@@ -8,7 +8,6 @@ import os
 import warnings
 from typing import Iterable
 
-import abutils
 from tqdm.auto import tqdm
 
 from ..utils.inputs import StructurePredictionRun, setup_structure_prediction_run
@@ -101,7 +100,7 @@ def protenix(
                 pbar.update(1)
 
     # write prediction logs (stdout and stderr)
-    abutils.io.make_dir(os.path.join(output_path, run.name))
+    os.makedirs(os.path.join(output_path, run.name), exist_ok=True)
     for run, run_path, future in zip(runs, output_paths, futures):
         result = future.result()
         stdout = result.stdout.decode("utf-8")

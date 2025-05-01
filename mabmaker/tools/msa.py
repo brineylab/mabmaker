@@ -7,13 +7,11 @@ import hashlib
 import logging
 import os
 import random
-import shutil
 import tarfile
 import time
 from pathlib import Path
 from typing import List, Literal, Mapping, Tuple
 
-import abutils
 import pandas as pd
 import requests
 from chai_lab.data.parsing.msas.aligned_pqt import (
@@ -624,7 +622,7 @@ def save_msa(
     seq_hash = hash_sequence(seq)
 
     # save the MSA
-    abutils.io.make_dir(destination_dir)
+    os.makedirs(destination_dir, exist_ok=True)
     msa_path = os.path.join(destination_dir, f"{seq_hash}.a3m")
     with open(msa_path, "w") as f:
         f.write(msa)
@@ -680,7 +678,7 @@ def precompute_boltz_msas(
     ):
         # make the run's precomputed MSA directory
         a3m_dir = os.path.join(base_output_path, run.name, "msas", "precomputed", "a3m")
-        abutils.io.make_dir(a3m_dir)
+        os.makedirs(a3m_dir, exist_ok=True)
         # get MSAs
         sequences = [chain.sequence for chain in run.protein_chains]
         msa_paths = msa(
@@ -750,8 +748,8 @@ def precompute_chai_msas(
         # make the run's precomputed MSA directories
         a3m_dir = os.path.join(base_output_path, run.name, "msas", "precomputed", "a3m")
         pqt_dir = os.path.join(base_output_path, run.name, "msas", "precomputed", "pqt")
-        abutils.io.make_dir(a3m_dir)
-        abutils.io.make_dir(pqt_dir)
+        os.makedirs(a3m_dir, exist_ok=True)
+        os.makedirs(pqt_dir, exist_ok=True)
         # get MSAs and convert to Chai's aligned parquet format
         sequences = [chain.sequence for chain in run.protein_chains]
         msa_paths = msa(

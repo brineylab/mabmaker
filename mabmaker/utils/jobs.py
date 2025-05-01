@@ -3,10 +3,8 @@
 # SPDX-License-Identifier: MIT
 
 import io
-import os
 import queue
 import subprocess as sp
-import sys
 import threading
 from contextlib import redirect_stderr, redirect_stdout
 from typing import Callable, Iterable

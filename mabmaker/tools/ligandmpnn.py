@@ -257,7 +257,7 @@ def ligandmpnn(
 
     """
     # output directory
-    abutils.io.make_dir(output_dir)
+    os.makedirs(output_dir, exist_ok=True)
 
     # setup logging
     global logger

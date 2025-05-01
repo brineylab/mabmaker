@@ -7,7 +7,6 @@ import os
 from collections import deque
 from typing import Tuple
 
-import abutils
 import yaml
 
 from .chains import get_chain_name_generator
@@ -221,7 +220,7 @@ class BoltzFormattingMixin:
         if output_path is not None:
             if os.path.isdir(output_path):
                 output_path = os.path.join(output_path, f"{self.name}.yaml")
-            abutils.io.make_dir(os.path.dirname(output_path))
+            os.makedirs(os.path.dirname(output_path), exist_ok=True)
             with open(output_path, "w") as f:
                 yaml.dump(yaml_data, f)
             return output_path
@@ -334,7 +333,7 @@ class ChaiFormattingMixin:
 
         # write to file
         if output_path is not None:
-            abutils.io.make_dir(output_path)
+            os.makedirs(output_path, exist_ok=True)
             fasta_path = os.path.join(output_path, f"{self.name}.fasta")
             with open(fasta_path, "w") as f:
                 f.write("\n".join(fastas))
@@ -502,7 +501,7 @@ class ProtenixFormattingMixin:
         if output_path is not None:
             if os.path.isdir(output_path):
                 output_path = os.path.join(output_path, f"{self.name}.json")
-            abutils.io.make_dir(os.path.dirname(output_path))
+            os.makedirs(os.path.dirname(output_path), exist_ok=True)
             with open(output_path, "w") as f:
                 json.dump([data], f, indent=2)
             return output_path
