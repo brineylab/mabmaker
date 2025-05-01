@@ -774,11 +774,12 @@ def precompute_protenix_msas(
         a3m_dir = os.path.join(msa_dir, "a3m")
         mmseqs_dir = os.path.join(msa_dir, "mmseqs")
         os.makedirs(a3m_dir, exist_ok=True)
+
         # get MSAs
         sequences = [chain.sequence for chain in run.protein_chains]
         msa_strings = msa(
             sequences=sequences,
-            output_dir=None,
+            output_dir=a3m_dir,
             prefix=mmseqs_dir,
             msa_server_url=msa_server_url,
             use_msa_cache=use_msa_cache,
@@ -786,24 +787,34 @@ def precompute_protenix_msas(
         )
         if isinstance(msa_strings, str):
             msa_strings = [msa_strings]
-        # process the MSAs
-        # processor = A3MProcessor(msa_strings, a3m_dir)
-        # processor.split_sequences()
 
         # add MSA paths to the run's protein chains
         for i, (chain, msa_string) in enumerate(zip(run.protein_chains, msa_strings)):
             msa_path = os.path.join(a3m_dir, str(i))  # base A3M dir plus chain index
             os.makedirs(msa_path, exist_ok=True)
-            # non-pairing MSA
-            nonpairing_path = os.path.join(msa_path, "non_pairing.a3m")
-            with open(nonpairing_path, "w") as f:
-                f.write(msa_string)
-            # pairing MSA (which we don't use)
-            pairing_path = os.path.join(msa_path, "pairing.a3m")
-            with open(pairing_path, "w") as f:
-                f.write("")  # empty file
-            # add the MSA path to the chain
+
+            # make the non-pairing MSA
+            non_pairing = ">query\n" + "\n".join(msa_string.split("\n")[1:])
+            with open(os.path.join(msa_path, "non_pairing.a3m"), "w") as f:
+                f.write(non_pairing)
+
+            # make the pairing MSA
+            pairing = ">query\n" + msa_string
+            with open(os.path.join(msa_path, "pairing.a3m"), "w") as f:
+                f.write(pairing)
+
             chain.msa = msa_path
+
+            # # non-pairing MSA
+            # nonpairing_path = os.path.join(msa_subdir, "non_pairing.a3m")
+            # with open(nonpairing_path, "w") as f:
+            #     f.write(msa_path)
+            # # pairing MSA (which we don't use)
+            # pairing_path = os.path.join(msa_subdir, "pairing.a3m")
+            # with open(pairing_path, "w") as f:
+            #     f.write("")  # empty file
+            # # add the MSA path to the chain
+            # chain.msa = msa_path
 
     return runs
 
