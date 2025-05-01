@@ -191,6 +191,7 @@ def _build_protenix_command(
     cmd += f" --sample_diffusion.N_step {num_diffusion_timesteps}"
     cmd += f" --sample_diffusion.N_sample {num_diffusion_samples}"
     cmd += " --need_atom_confidence true"
+    return cmd
 
     # # build command
     # cmd = "protenix predict"
