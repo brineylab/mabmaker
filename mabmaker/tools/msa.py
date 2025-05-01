@@ -727,12 +727,10 @@ def precompute_boltz_msas(
         bar_format="{desc}{percentage:3.0f}%|{bar:25}{r_bar}",
     ):
         # make the run's precomputed MSA directory
-        a3m_dir = os.path.join(base_output_path, run.name, "msas", "precomputed", "a3m")
-        mmseqs_dir = os.path.join(
-            base_output_path, run.name, "msas", "precomputed", "mmseqs"
-        )
+        msa_dir = os.path.join(base_output_path, run.name, "msas", "precomputed")
+        a3m_dir = os.path.join(msa_dir, "a3m")
+        mmseqs_dir = os.path.join(msa_dir, "mmseqs")
         os.makedirs(a3m_dir, exist_ok=True)
-        os.makedirs(mmseqs_dir, exist_ok=True)
         # get MSAs
         sequences = [chain.sequence for chain in run.protein_chains]
         msa_paths = msa(
@@ -801,14 +799,12 @@ def precompute_chai_msas(
         bar_format="{desc}{percentage:3.0f}%|{bar:25}{r_bar}",
     ):
         # make the run's precomputed MSA directories
-        a3m_dir = os.path.join(base_output_path, run.name, "msas", "precomputed", "a3m")
-        pqt_dir = os.path.join(base_output_path, run.name, "msas", "precomputed", "pqt")
-        mmseqs_dir = os.path.join(
-            base_output_path, run.name, "msas", "precomputed", "mmseqs"
-        )
+        msa_dir = os.path.join(base_output_path, run.name, "msas", "precomputed")
+        a3m_dir = os.path.join(msa_dir, "a3m")
+        pqt_dir = os.path.join(msa_dir, "pqt")
+        mmseqs_dir = os.path.join(msa_dir, "mmseqs")
         os.makedirs(a3m_dir, exist_ok=True)
         os.makedirs(pqt_dir, exist_ok=True)
-        os.makedirs(mmseqs_dir, exist_ok=True)
         # get MSAs and convert to Chai's aligned parquet format
         sequences = [chain.sequence for chain in run.protein_chains]
         msa_paths = msa(
