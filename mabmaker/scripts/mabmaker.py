@@ -2,6 +2,7 @@
 # Distributed under the terms of the MIT License.
 # SPDX-License-Identifier: MIT
 
+import os
 from typing import Iterable, Optional, Union
 
 import click
@@ -275,6 +276,17 @@ def protenix(
     help="The URL of the MSA server.",
 )
 @click.option(
+    "--use_msa_cache/--no_use_msa_cache",
+    default=True,
+    help="Whether to use the MSA cache.",
+)
+@click.option(
+    "--msa_cache_dir",
+    type=str,
+    default="~/.mabmaker/msa_cache",
+    help="The path to the MSA cache directory.",
+)
+@click.option(
     "--recycle_msa_subsample",
     type=int,
     default=0,
@@ -334,6 +346,8 @@ def chai(
     gpus: int | Iterable[int] | None = None,
     use_msa_server: bool = True,
     msa_server_url: str = "https://api.colabfold.com",
+    use_msa_cache: bool = True,
+    msa_cache_dir: str = "~/.mabmaker/msa_cache",
     recycle_msa_subsample: int = 0,
     use_templates_server: bool = False,
     template_hits_path: Optional[str] = None,
@@ -348,11 +362,13 @@ def chai(
     Structure prediction with Chai-1.
     """
     run_chai(
-        json_path=json_path,
-        output_path=output_path,
+        json_path=os.path.expanduser(json_path),
+        output_path=os.path.expanduser(output_path),
         gpus=gpus,
         use_msa_server=use_msa_server,
         msa_server_url=msa_server_url,
+        use_msa_cache=use_msa_cache,
+        msa_cache_dir=os.path.expanduser(msa_cache_dir),
         recycle_msa_subsample=recycle_msa_subsample,
         use_templates_server=use_templates_server,
         template_hits_path=template_hits_path,
@@ -394,6 +410,17 @@ def chai(
     type=str,
     default="https://api.colabfold.com",
     help="The URL of the MSA server.",
+)
+@click.option(
+    "--use_msa_cache/--no_use_msa_cache",
+    default=True,
+    help="Whether to use the MSA cache.",
+)
+@click.option(
+    "--msa_cache_dir",
+    type=str,
+    default="~/.mabmaker/msa_cache",
+    help="The path to the MSA cache directory.",
 )
 @click.option(
     "--recycling_steps",
@@ -459,6 +486,8 @@ def boltz(
     gpus: int | Iterable[int] | None = None,
     use_msa_server: bool = True,
     msa_server_url: str = "https://api.colabfold.com",
+    use_msa_cache: bool = True,
+    msa_cache_dir: str = "~/.mabmaker/msa_cache",
     recycling_steps: int = 3,
     sampling_steps: int = 200,
     diffusion_samples: int = 5,
@@ -474,11 +503,13 @@ def boltz(
     Structure prediction with Boltz-1.
     """
     run_boltz(
-        json_path=json_path,
-        output_path=output_path,
+        json_path=os.path.expanduser(json_path),
+        output_path=os.path.expanduser(output_path),
         gpus=gpus,
         use_msa_server=use_msa_server,
         msa_server_url=msa_server_url,
+        use_msa_cache=use_msa_cache,
+        msa_cache_dir=os.path.expanduser(msa_cache_dir),
         recycling_steps=recycling_steps,
         sampling_steps=sampling_steps,
         diffusion_samples=diffusion_samples,
