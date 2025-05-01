@@ -779,7 +779,7 @@ def precompute_protenix_msas(
         sequences = [chain.sequence for chain in run.protein_chains]
         msa_strings = msa(
             sequences=sequences,
-            output_dir=a3m_dir,
+            output_dir=None,
             prefix=mmseqs_dir,
             msa_server_url=msa_server_url,
             use_msa_cache=use_msa_cache,
