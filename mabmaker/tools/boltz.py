@@ -118,7 +118,12 @@ def boltz(
     runs = setup_structure_prediction_run(json_path, output_path)
 
     # MSAs
-    runs = precompute_boltz_msas(runs, output_path, msa_cache_dir)
+    runs = precompute_boltz_msas(
+        runs=runs,
+        base_output_path=output_path,
+        use_msa_cache=use_msa_cache,
+        msa_cache_dir=msa_cache_dir,
+    )
 
     # get GPU queue
     gpu_queue = get_gpu_queue(gpus)
