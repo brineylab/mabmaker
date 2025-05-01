@@ -3,6 +3,7 @@
 # SPDX-License-Identifier: MIT
 
 import glob
+import json
 import os
 import shutil
 
@@ -325,6 +326,31 @@ def process_protenix_output(
                 metrics_path, "confidence", f"{seed}|{model_num}|{run_name}.json"
             ),
         )
+
+    # copy metrics -- "full data"
+    for full_data_path in glob.glob(
+        os.path.join(original_path, "*", "*", "predictions", "*_full_data_*.json")
+    ):
+        model_num = os.path.basename(full_data_path).split("_")[-1].split(".")[0]
+        seed = os.path.basename(full_data_path).split("_")[-5]
+        with open(full_data_path, "r") as f:
+            metrics_data = json.load(f)
+        npz_file = f"{seed}|{model_num}|{run_name}.npz"
+
+        # pLDDT
+        plddt_scores = np.array(metrics_data["atom_plddt"])
+        with open(os.path.join(metrics_path, "plddt", npz_file), "wb") as f:
+            np.savez(f, plddt_scores)
+
+        # PAE
+        pae_scores = np.array(metrics_data["token_pair_pae"])
+        with open(os.path.join(metrics_path, "pae", npz_file), "wb") as f:
+            np.savez(f, pae_scores)
+
+        # PDE
+        pde_scores = np.array(metrics_data["token_pair_pde"])
+        with open(os.path.join(metrics_path, "pde", npz_file), "wb") as f:
+            np.savez(f, pde_scores)
 
     # copy msas
     for msa_path in glob.glob(os.path.join(original_path, "*", "msa_resmsa_*")):
