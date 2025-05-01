@@ -98,30 +98,34 @@ def process_boltz_output(
         os.path.join(original_path, "*", "predictions", "*", "pde*.npz")
     ):
         model_num = os.path.basename(pde_path).split("_")[-1].split(".")[0]
-        shutil.copy(
-            pde_path,
-            os.path.join(metrics_path, "pde", f"{seed}|{model_num}|{run_name}.npz"),
-        )
+        pde_data = np.load(pde_path)["pde"]
+        npy_file = f"{seed}|{model_num}|{run_name}.npy"
+        with open(os.path.join(metrics_path, "pde", npy_file), "wb") as f:
+            np.save(f, pde_data)
+        plot_file = f"{seed}|{model_num}|{run_name}.pdf"
+        plot_pde(pde_data, os.path.join(metrics_path, "pde", plot_file))
 
     # copy metrics -- pae
     for pae_path in glob.glob(
         os.path.join(original_path, "*", "predictions", "*", "pae*.npz")
     ):
         model_num = os.path.basename(pae_path).split("_")[-1].split(".")[0]
-        shutil.copy(
-            pae_path,
-            os.path.join(metrics_path, "pae", f"{seed}|{model_num}|{run_name}.npz"),
-        )
+        pae_data = np.load(pae_path)["pae"]
+        npy_file = f"{seed}|{model_num}|{run_name}.npy"
+        with open(os.path.join(metrics_path, "pae", npy_file), "wb") as f:
+            np.save(f, pae_data)
+        plot_file = f"{seed}|{model_num}|{run_name}.pdf"
+        plot_pae(pae_data, os.path.join(metrics_path, "pae", plot_file))
 
     # copy metrics -- plddt
     for plddt_path in glob.glob(
         os.path.join(original_path, "*", "predictions", "*", "plddt*.npz")
     ):
         model_num = os.path.basename(plddt_path).split("_")[-1].split(".")[0]
-        shutil.copy(
-            plddt_path,
-            os.path.join(metrics_path, "plddt", f"{seed}|{model_num}|{run_name}.npz"),
-        )
+        plddt_data = np.load(plddt_path)["plddt"]
+        npy_file = f"{seed}|{model_num}|{run_name}.npy"
+        with open(os.path.join(metrics_path, "plddt", npy_file), "wb") as f:
+            np.save(f, plddt_data)
 
     # copy msas
     abutils.io.make_dir(os.path.join(msas_path, seed))
@@ -218,20 +222,27 @@ def process_chai_output(
     # write metrics -- pde
     pde_scores = result.pde.numpy()
     for i, pde_score in enumerate(pde_scores):
-        npz_file = os.path.join(metrics_path, "pde", f"{seed}|{i}|{run_name}.npz")
-        np.savez(npz_file, pde_score)
+        npy_file = os.path.join(metrics_path, "pde", f"{seed}|{i}|{run_name}.npy")
+        with open(npy_file, "wb") as f:
+            np.save(f, pde_score)
+        plot_file = os.path.join(metrics_path, "pde", f"{seed}|{i}|{run_name}.pdf")
+        plot_pde(pde_score, plot_file)
 
     # write metrics -- pae
     pae_scores = result.pae.numpy()
     for i, pae_score in enumerate(pae_scores):
-        npz_file = os.path.join(metrics_path, "pae", f"{seed}|{i}|{run_name}.npz")
-        np.savez(npz_file, pae_score)
+        npy_file = os.path.join(metrics_path, "pae", f"{seed}|{i}|{run_name}.npy")
+        with open(npy_file, "wb") as f:
+            np.save(f, pae_score)
+        plot_file = os.path.join(metrics_path, "pae", f"{seed}|{i}|{run_name}.pdf")
+        plot_pae(pae_score, plot_file)
 
     # write metrics -- plddt
     plddt_scores = result.plddt.numpy()
     for i, plddt_score in enumerate(plddt_scores):
-        npz_file = os.path.join(metrics_path, "plddt", f"{seed}|{i}|{run_name}.npz")
-        np.savez(npz_file, plddt_score)
+        npy_file = os.path.join(metrics_path, "plddt", f"{seed}|{i}|{run_name}.npy")
+        with open(npy_file, "wb") as f:
+            np.save(f, plddt_score)
 
     # copy msas
     abutils.io.make_dir(os.path.join(msas_path, seed))
