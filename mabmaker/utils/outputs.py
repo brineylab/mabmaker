@@ -8,6 +8,7 @@ import os
 import shutil
 
 import abutils
+import matplotlib.pyplot as plt
 import numpy as np
 from chai_lab.chai1 import StructureCandidates
 
@@ -335,22 +336,25 @@ def process_protenix_output(
         seed = os.path.basename(full_data_path).split("_")[-5]
         with open(full_data_path, "r") as f:
             metrics_data = json.load(f)
-        npz_file = f"{seed}|{model_num}|{run_name}.npz"
+        npy_file = f"{seed}|{model_num}|{run_name}.npy"
+        plot_file = f"{seed}|{model_num}|{run_name}.pdf"
 
         # pLDDT
         plddt_scores = np.array(metrics_data["atom_plddt"])
-        with open(os.path.join(metrics_path, "plddt", npz_file), "wb") as f:
-            np.savez(f, plddt_scores)
+        with open(os.path.join(metrics_path, "plddt", npy_file), "wb") as f:
+            np.save(f, plddt_scores)
 
         # PAE
         pae_scores = np.array(metrics_data["token_pair_pae"])
-        with open(os.path.join(metrics_path, "pae", npz_file), "wb") as f:
-            np.savez(f, pae_scores)
+        plot_pae(pae_scores, os.path.join(metrics_path, "pae", plot_file))
+        with open(os.path.join(metrics_path, "pae", npy_file), "wb") as f:
+            np.save(f, pae_scores)
 
         # PDE
         pde_scores = np.array(metrics_data["token_pair_pde"])
-        with open(os.path.join(metrics_path, "pde", npz_file), "wb") as f:
-            np.savez(f, pde_scores)
+        plot_pde(pde_scores, os.path.join(metrics_path, "pde", plot_file))
+        with open(os.path.join(metrics_path, "pde", npy_file), "wb") as f:
+            np.save(f, pde_scores)
 
     # copy msas
     for msa_path in glob.glob(os.path.join(original_path, "*", "msa_resmsa_*")):
@@ -423,3 +427,128 @@ def _get_raw_output_path(base_path: str) -> str:
     Get the path to the raw output directory.
     """
     return os.path.join(base_path, "raw_output")
+
+
+# ---------------------------------
+#             Plots
+# ---------------------------------
+
+
+def plot_pae(
+    pae: np.ndarray,
+    output_file: str | None = None,
+    cmap: str = "Greens_r",
+    show_cbar: bool = True,
+) -> plt.Figure | None:
+    """
+    Plot a Predicted Alignment Error (PAE) heatmap.
+
+    Parameters
+    ----------
+    pae : np.ndarray, shape (N, N)
+        The PAE matrix.
+
+    output_file : str
+        Path to the output (figure) file. If not provided,
+        the ``plt.Figure`` object is returned.
+
+    cmap : str, optional
+        Matplotlib colormap to use.
+
+    show_cbar : bool, default=True
+        If True, show the colorbar.
+
+    Returns
+    -------
+    None
+    """
+    # plot
+    fig, ax = plt.subplots(figsize=(6, 5))
+    im = ax.imshow(
+        pae, origin="upper", interpolation="nearest", cmap=cmap, vmin=0, aspect="equal"
+    )
+    for s in ["top", "bottom", "left", "right"]:
+        ax.spines[s].set_visible(False)
+
+    # color bar
+    if show_cbar:
+        cbar = fig.colorbar(
+            im,
+            ax=ax,
+            fraction=0.046,
+            pad=0.04,
+        )
+        cbar.set_label("PAE (Å)", rotation=270, labelpad=15, fontsize=13)
+        cbar.ax.invert_yaxis()
+        cbar.outline.set_visible(False)
+
+    # no ticks
+    ticks = []
+    ax.set_xticks(ticks)
+    ax.set_yticks(ticks)
+
+    plt.tight_layout()
+    if output_file is not None:
+        plt.savefig(output_file)
+    else:
+        return fig
+
+
+def plot_pde(
+    pde: np.ndarray,
+    output_file: str | None = None,
+    cmap: str = "Blues_r",
+    show_cbar: bool = True,
+) -> plt.Figure | None:
+    """
+    Plot a Predicted Distance Error (PDE) heatmap.
+
+    Parameters
+    ----------
+    pde : np.ndarray, shape (N, N)
+        The PDE matrix.
+
+    output_file : str
+        Path to the output (figure) file. If not provided,
+        the ``plt.Figure`` object is returned.
+
+    cmap : str, optional
+        Matplotlib colormap to use.
+
+    show_cbar : bool, default=True
+        If True, show the colorbar.
+
+    Returns
+    -------
+    None
+    """
+    # plot
+    fig, ax = plt.subplots(figsize=(6, 5))
+    im = ax.imshow(
+        pde, origin="upper", interpolation="nearest", cmap=cmap, vmin=0, aspect="equal"
+    )
+    for s in ["top", "bottom", "left", "right"]:
+        ax.spines[s].set_visible(False)
+
+    # color bar
+    if show_cbar:
+        cbar = fig.colorbar(
+            im,
+            ax=ax,
+            fraction=0.046,
+            pad=0.04,
+        )
+        cbar.set_label("PDE (Å)", rotation=270, labelpad=15, fontsize=13)
+        cbar.ax.invert_yaxis()
+        cbar.outline.set_visible(False)
+
+    # no ticks
+    ticks = []
+    ax.set_xticks(ticks)
+    ax.set_yticks(ticks)
+
+    plt.tight_layout()
+    if output_file is not None:
+        plt.savefig(output_file)
+    else:
+        return fig
