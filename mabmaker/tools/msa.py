@@ -792,7 +792,7 @@ def precompute_protenix_msas(
 
         # add MSA paths to the run's protein chains
         for i, (chain, msa_string) in enumerate(zip(run.protein_chains, msa_strings)):
-            msa_path = os.path.join(a3m_dir, i)  # base A3M dir, plus the chain index
+            msa_path = os.path.join(a3m_dir, str(i))  # base A3M dir plus chain index
             os.makedirs(msa_path, exist_ok=True)
             # non-pairing MSA
             nonpairing_path = os.path.join(msa_path, "non_pairing.a3m")
