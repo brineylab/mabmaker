@@ -2,9 +2,6 @@
 # Distributed under the terms of the MIT License.
 # SPDX-License-Identifier: MIT
 
-# This is a modified version of the `run_mmseqs2` function from the `colabfold` package.
-# https://github.com/sokrypton/ColabFold/blob/main/colabfold/colabfold.py
-
 
 import hashlib
 import logging
@@ -154,6 +151,10 @@ def msa(
         return msa_paths[0]
     else:
         return msa_paths
+
+
+# This is a modified version of the `run_mmseqs2` function from the `colabfold` package.
+# https://github.com/sokrypton/ColabFold/blob/main/colabfold/colabfold.py
 
 
 def run_mmseqs2(
