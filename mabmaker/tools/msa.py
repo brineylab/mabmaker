@@ -59,7 +59,7 @@ def msa(
     user_agent: str = f"mabmaker/{__version__} briney@scripps.edu",
     use_msa_cache: bool = True,
     msa_cache_dir: str = "~/.mabmaker/msa_cache",
-    quiet: bool = False,
+    quiet: bool = True,
 ) -> str | list[str]:
     f"""
     Perform a multiple sequence alignment using the `ColabFold MMseqs2 API`_.
