@@ -13,6 +13,7 @@ from tqdm.auto import tqdm
 from ..utils.inputs import StructurePredictionRun, setup_structure_prediction_run
 from ..utils.jobs import get_gpu_queue, gpu_worker
 from ..utils.outputs import process_protenix_output
+from .msa import precompute_protenix_msas
 
 warnings.filterwarnings("ignore", category=DeprecationWarning)
 
@@ -28,8 +29,10 @@ def protenix(
     output_path: str,
     gpus: int | Iterable[int] | None = None,
     use_msa_server: bool = True,
-    num_trunk_recycles: int = 3,
-    num_trunk_samples: int = 1,
+    msa_server_url: str = "https://api.colabfold.com",
+    use_msa_cache: bool = True,
+    msa_cache_dir: str = "~/.mabmaker/msa_cache",
+    num_trunk_recycles: int = 4,
     num_diffusion_timesteps: int = 200,
     num_diffusion_samples: int = 5,
 ) -> None:
@@ -65,12 +68,39 @@ def protenix(
     msa_server_url : str, optional, default="https://api.colabfold.com"
         The URL of the MSA server.
 
+    use_msa_cache : bool, optional, default=True
+        Whether to use the MSA cache.
+
+    msa_cache_dir : str, optional, default="~/.mabmaker/msa_cache"
+        The path to the MSA cache directory.
+
+    num_trunk_recycles : int, optional, default=3
+        The number of trunk recycling steps.
+
+    num_trunk_samples : int, optional, default=1
+        The number of trunk samples to generate.
+
+    num_diffusion_timesteps : int, optional, default=200
+        The number of diffusion timesteps to use.
+
+    num_diffusion_samples : int, optional, default=5
+        The number of diffusion samples to generate.
+
     .. _Protenix: https://github.com/bytedance/Protenix
     .. _AlphaFold3 input JSON file: https://github.com/google-deepmind/alphafold/tree/main/server
 
     """
     # setup runs
     runs = setup_structure_prediction_run(json_path, output_path)
+
+    # precompute MSAs
+    runs = precompute_protenix_msas(
+        runs=runs,
+        base_output_path=output_path,
+        msa_server_url=msa_server_url,
+        use_msa_cache=use_msa_cache,
+        msa_cache_dir=msa_cache_dir,
+    )
 
     # get GPU queue
     gpu_queue = get_gpu_queue(gpus)
@@ -85,7 +115,9 @@ def protenix(
             cmd = _build_protenix_command(
                 run=run,
                 output_path=run_output_path,
-                use_msa_server=use_msa_server,
+                num_trunk_recycles=num_trunk_recycles,
+                num_diffusion_timesteps=num_diffusion_timesteps,
+                num_diffusion_samples=num_diffusion_samples,
             )
             futures.append(executor.submit(gpu_worker, cmd, gpu_queue))
             output_paths.append(run_output_path)
@@ -117,7 +149,9 @@ def protenix(
 def _build_protenix_command(
     run: StructurePredictionRun,
     output_path: str,
-    use_msa_server: bool = True,
+    num_trunk_recycles: int = 4,
+    num_diffusion_timesteps: int = 200,
+    num_diffusion_samples: int = 5,
 ) -> str:
     """
     Build a command for running `Protenix`_.
@@ -149,10 +183,20 @@ def _build_protenix_command(
     run.build_protenix_input(json_path)
 
     # build command
-    cmd = "protenix predict"
-    cmd += f" --input '{json_path}'"
-    cmd += f" --out_dir '{output_path}'"
+    cmd = f"python {os.path.join(PROTENIX_DIR, 'runner', 'inference.py')}"
     cmd += f" --seeds {seeds}"
-    if use_msa_server:
-        cmd += " --use_msa_server"
-    return cmd
+    cmd += f" --input_json_path {json_path}"
+    cmd += f" --dump_dir {output_path}"
+    cmd += f" --model.N_cycle {num_trunk_recycles}"
+    cmd += f" --sample_diffusion.N_step {num_diffusion_timesteps}"
+    cmd += f" --sample_diffusion.N_sample {num_diffusion_samples}"
+    cmd += " --need_atom_confidence true"
+
+    # # build command
+    # cmd = "protenix predict"
+    # cmd += f" --input '{json_path}'"
+    # cmd += f" --out_dir '{output_path}'"
+    # cmd += f" --seeds {seeds}"
+    # if use_msa_server:
+    #     cmd += " --use_msa_server"
+    # return cmd

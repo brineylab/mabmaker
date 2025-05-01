@@ -11,7 +11,7 @@ import tarfile
 import tempfile
 import time
 from pathlib import Path
-from typing import List, Literal, Mapping, Tuple
+from typing import Dict, List, Literal, Mapping, Tuple
 
 import pandas as pd
 import requests
@@ -47,7 +47,7 @@ TQDM_BAR_FORMAT = (
 
 def msa(
     sequences: str | list[str],
-    output_dir: str,
+    output_dir: str | None = None,
     prefix: str | None = None,
     use_env: bool = True,
     use_filter: bool = True,
@@ -72,7 +72,9 @@ def msa(
 
     output_dir: str
         The directory to save the output files. If `use_msa_cache` is `True` and MSAs are found
-        in the cache, they will be copied into this directory.
+        in the cache, they will be copied into this directory. If `None`, the function will return
+        the contents of the A3M files (as a list of strings) rather than saving them to disk and
+        returning file paths.
 
     prefix : str, optional, default=tempfile.mkdtemp()
         The prefix for temporary output files. Passed directly to ``run_mmseqs2``.
@@ -158,48 +160,18 @@ def msa(
         if use_msa_cache and i in mmseqs2_slots:
             # only cache sequences that aren't already in the cache
             save_msa(a3m_string, msa_cache_dir)
-        msa_path = save_msa(a3m_string, output_dir)
-        msa_paths.append(msa_path)
+        # save MSA to the output directory, if provided
+        if output_dir is not None:
+            msa_path = save_msa(a3m_string, output_dir)
+            msa_paths.append(msa_path)
+        # otherwise, return MSA as a string
+        else:
+            msa_paths.append(a3m_string)
 
-    return msa_paths
-
-    # if isinstance(sequences, str):
-    #     sequences = [sequences]
-
-    # msa_paths = []
-    # for seq in sequences:
-    #     # check the cache
-    #     msa_cache_dir = os.path.expanduser(msa_cache_dir)
-    #     a3m_string = (
-    #         retrieve_msa_from_cache(seq, msa_cache_dir) if use_msa_cache else None
-    #     )
-    #     # if the MSA is not in the cache (or we're not using the cache), run MMseqs2
-    #     if a3m_string is None:
-    #         a3m_lines = run_mmseqs2(
-    #             x=seq,
-    #             prefix=prefix,
-    #             use_env=use_env,
-    #             use_filter=use_filter,
-    #             use_templates=False,
-    #             filter=filter,
-    #             use_pairing=use_pairing,
-    #             pairing_strategy=pairing_strategy,
-    #             host_url=msa_server_url,
-    #             user_agent=user_agent,
-    #             quiet=quiet,
-    #         )
-    #         a3m_string = a3m_lines[0]
-    #         # save the MSA to the cache
-    #         if use_msa_cache:
-    #             save_msa(a3m_string, msa_cache_dir)
-    #     # copy the MSA from the cache to the output directory
-    #     msa_path = save_msa(a3m_string, output_dir)
-    #     msa_paths.append(msa_path)
-
-    # if len(msa_paths) == 1:
-    #     return msa_paths[0]
-    # else:
-    #     return msa_paths
+    if len(msa_paths) == 1:
+        return msa_paths[0]
+    else:
+        return msa_paths
 
 
 # This is a modified version of the `run_mmseqs2` function from the `colabfold` package.
@@ -749,6 +721,245 @@ def precompute_boltz_msas(
             chain.msa = msa_path
 
     return runs
+
+
+# -----------------------------
+#        Protenix MSAs
+# -----------------------------
+
+
+def precompute_protenix_msas(
+    runs: list[StructurePredictionRun],
+    base_output_path: str,
+    msa_server_url: str = "https://api.colabfold.com",
+    use_msa_cache: bool = True,
+    msa_cache_dir: str = "~/.mabmaker/msa_cache",
+) -> list[StructurePredictionRun]:
+    """
+    Precompute MSAs for Protenix runs.
+
+    Parameters
+    ----------
+    runs : list[StructurePredictionRun]
+        The runs to precompute MSAs for. MSAs will be computed for each protein chain in
+        each run.
+
+    output_path : str
+        The path to the output directory. MSAs will be saved into a subdirectory called
+        ``msas/precomputed``.
+
+    use_msa_cache : bool, optional, default=True
+        Whether to use the MSA cache. If ``True``, the cache will be checked for existing
+        MSAs before running ``mmseqs2``. If a sequence is not present in the cache, the
+        resulting MSA will be saved to the cache. If ``False``, ``mmseqs2`` will be run
+        for each sequence and the resulting MSAs will not be cached.
+
+    msa_cache_dir : str, optional, default="~/.mabmaker/msa_cache"
+        The path to the MSA cache directory.
+
+    Returns
+    -------
+    list[StructurePredictionRun]
+        The run objects with precomputed MSA file paths added to the ``msa`` attribute
+        of each protein chain.
+
+    """
+    for run in tqdm(
+        runs,
+        desc="precomputing MSAs: ",
+        bar_format="{desc}{percentage:3.0f}%|{bar:25}{r_bar}",
+    ):
+        # make the run's precomputed MSA directory
+        msa_dir = os.path.join(base_output_path, run.name, "msas", "precomputed")
+        a3m_dir = os.path.join(msa_dir, "a3m")
+        mmseqs_dir = os.path.join(msa_dir, "mmseqs")
+        os.makedirs(a3m_dir, exist_ok=True)
+        # get MSAs
+        sequences = [chain.sequence for chain in run.protein_chains]
+        msa_strings = msa(
+            sequences=sequences,
+            output_dir=None,
+            prefix=mmseqs_dir,
+            msa_server_url=msa_server_url,
+            use_msa_cache=use_msa_cache,
+            msa_cache_dir=msa_cache_dir,
+        )
+        if isinstance(msa_strings, str):
+            msa_strings = [msa_strings]
+        # process the MSAs
+        # processor = A3MProcessor(msa_strings, a3m_dir)
+        # processor.split_sequences()
+
+        # add MSA paths to the run's protein chains
+        for i, (chain, msa_string) in enumerate(zip(run.protein_chains, msa_strings)):
+            msa_path = os.path.join(a3m_dir, i)  # base A3M dir, plus the chain index
+            os.makedirs(msa_path, exist_ok=True)
+            # non-pairing MSA
+            nonpairing_path = os.path.join(msa_path, "non_pairing.a3m")
+            with open(nonpairing_path, "w") as f:
+                f.write(msa_string)
+            # pairing MSA (which we don't use)
+            pairing_path = os.path.join(msa_path, "pairing.a3m")
+            with open(pairing_path, "w") as f:
+                f.write("")  # empty file
+            # add the MSA path to the chain
+            chain.msa = msa_path
+
+    return runs
+
+
+# the following class is adapted from:
+# https://github.com/bytedance/Protenix/blob/main/scripts/colabfold_msa.py
+
+
+class A3MProcessor:
+    """Processor for A3M file format."""
+
+    def __init__(self, a3m_file: str, out_dir: str):
+        self.out_dir = out_dir
+        self.a3m_file = Path(a3m_file)
+        self.a3m_content = self._read_a3m_file()
+        self.chain_info = self._parse_header()
+
+    def _read_a3m_file(self) -> str:
+        """Read A3M file content."""
+        return self.a3m_file.read_text()
+
+    def _parse_header(self) -> Tuple[List[str], Dict[str, Tuple[int, int]]]:
+        """Parse A3M header to get chain information."""
+        first_line = self.a3m_content.split("\n")[0]
+        if first_line[0] == "#":
+            lengths, oligomeric_state = first_line.split("\t")
+
+            chain_lengths = [int(x) for x in lengths[1:].split(",")]
+            chain_names = [f"10{x+1}" for x in range(len(oligomeric_state.split(",")))]
+
+            # Calculate sequence ranges for each chain
+            seq_ranges = {}
+            for i, name in enumerate(chain_names):
+                start = sum(chain_lengths[:i])
+                end = sum(chain_lengths[: i + 1])
+                seq_ranges[name] = (start, end)
+
+            return chain_names, seq_ranges
+        else:
+            non_pairing = ">query\n" + "\n".join(self.a3m_content.split("\n")[1:])
+            query_seq = self.a3m_content.split("\n")[1]
+            pairing = f">query\n{query_seq}"
+            msa_path = Path(self.out_dir) / "msa"
+            msa_path.mkdir(exist_ok=True)
+            msa_path = msa_path / "0"
+            msa_path.mkdir(exist_ok=True)
+            with open(msa_path / "non_pairing.a3m", "w") as f:
+                f.write(non_pairing)
+
+            with open(msa_path / "pairing.a3m", "w") as f:
+                f.write(pairing)
+
+            return [None]
+
+    def _extract_sequence(self, line: str, range_tuple: Tuple[int, int]) -> str:
+        """Extract sequence for specific range."""
+        seq = []
+        no_insert_count = 0
+        start, end = range_tuple
+
+        for char in line:
+            if char.isupper() or char == "-":
+                no_insert_count += 1
+            # we keep insertions
+            if start < no_insert_count <= end:
+                seq.append(char)
+            elif no_insert_count > end:
+                break
+
+        return "".join(seq)
+
+    def split_sequences(self) -> None:
+        """Split A3M file into pairing and non-pairing sequences."""
+        out_dir = Path(self.out_dir) / "msa"
+        chain_names, seq_ranges = self.chain_info
+
+        pairing_a3ms = {name: [] for name in chain_names}
+        nonpairing_a3ms = {name: [] for name in chain_names}
+
+        current_query = None
+        for line in self.a3m_content.split("\n"):
+            if line.startswith("#"):
+                continue
+
+            if line.startswith(">"):
+                name = line[1:]
+                if name in chain_names:
+                    current_query = chain_names[chain_names.index(name)]
+                elif name == "\t".join(chain_names):
+                    current_query = None
+
+                # Add header line to appropriate dictionary
+                if current_query:
+                    nonpairing_a3ms[current_query].append(line)
+                else:
+                    for name in chain_names:
+                        pairing_a3ms[name].append(line)
+                continue
+
+            # Process sequence line
+            if not line:
+                continue
+
+            if current_query:
+                seq = self._extract_sequence(line, seq_ranges[current_query])
+                nonpairing_a3ms[current_query].append(seq)
+            else:
+                for name in chain_names:
+                    seq = self._extract_sequence(line, seq_ranges[name])
+                    pairing_a3ms[name].append(seq)
+
+        self._write_output_files(out_dir, nonpairing_a3ms, pairing_a3ms)
+
+    def _write_output_files(
+        self,
+        out_dir: Path,
+        nonpairing_a3ms: Dict[str, List[str]],
+        pairing_a3ms: Dict[str, List[str]],
+    ) -> None:
+        """Write split sequences to output files."""
+        out_dir.mkdir(exist_ok=True)
+
+        # Write non-pairing sequences
+        for i, (name, lines) in enumerate(nonpairing_a3ms.items()):
+            chain_dir = out_dir / str(i)
+            chain_dir.mkdir(exist_ok=True)
+
+            with open(chain_dir / "non_pairing.a3m", "w") as f:
+                query_seq = lines[1]
+                f.write(">query\n")
+                f.write(f"{query_seq}\n")
+                f.write("\n".join(lines[2:]))
+
+        # Write pairing sequences
+        for i, (name, lines) in enumerate(pairing_a3ms.items()):
+            chain_dir = out_dir / str(i)
+            chain_dir.mkdir(exist_ok=True)
+
+            with open(chain_dir / "pairing.a3m", "w") as f:
+                query_seq = lines[1]
+                f.write(">query\n")
+                f.write(f"{query_seq}\n")
+
+                # Process remaining sequences
+                sequences = {}
+                for j, line in enumerate(lines[2:]):
+                    if line.startswith(">"):
+                        current_name = f"UniRef100_{line[1:].split()[i]}_{j}"
+                        sequences[current_name] = ""
+                    elif line and "DUMMY" not in current_name:
+                        sequences[current_name] = line
+
+                # Write processed sequences
+                for seq_name, seq in sequences.items():
+                    if seq:  # Only write non-empty sequences
+                        f.write(f">{seq_name}\n{seq}\n")
 
 
 # -----------------------------

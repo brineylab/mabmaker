@@ -394,21 +394,27 @@ class ProtenixFormattingMixin:
         # protein chains
         for chain in self.protein_chains:
             chain_name = protein_chain_names.popleft()
-            sequences.append(
-                {
-                    "proteinChain": {
-                        "sequence": chain.sequence,
-                        "count": chain.count,
-                        "modifications": [
-                            {
-                                "ptmType": m.modification_type,
-                                "ptmPosition": m.position,
-                            }
-                            for m in chain.modifications
-                        ],
-                    }
+            chain_sequence = {
+                "proteinChain": {
+                    "sequence": chain.sequence,
+                    "count": chain.count,
+                    "modifications": [
+                        {
+                            "ptmType": m.modification_type,
+                            "ptmPosition": m.position,
+                        }
+                        for m in chain.modifications
+                    ],
                 }
-            )
+            }
+            # add MSA if it exists
+            if chain.msa is not None:
+                chain_sequence["proteinChain"]["msa"] = {
+                    "precomputed_msa_dir": chain.msa,
+                    "pairing_db": "uniref100",
+                }
+            sequences.append(chain_sequence)
+
             # add glycans (if present)
             for glycan in chain.glycans:
                 glycan_name = glycan_chain_names.popleft()
