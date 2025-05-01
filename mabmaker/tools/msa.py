@@ -11,7 +11,7 @@ import shutil
 import tarfile
 import time
 from pathlib import Path
-from typing import List, Literal, Mapping, Optional, Tuple
+from typing import List, Literal, Mapping, Tuple
 
 import abutils
 import pandas as pd
@@ -34,6 +34,8 @@ __all__ = [
     "hash_sequence",
     "retrieve_msa_from_cache",
     "save_msa",
+    "precompute_boltz_msas",
+    "precompute_chai_msas",
 ]
 
 logger = logging.getLogger(__name__)
