@@ -701,8 +701,8 @@ def precompute_boltz_msas(
     ):
         # make the run's precomputed MSA directory
         msa_dir = os.path.join(base_output_path, run.name, "msas", "precomputed")
-        a3m_dir = os.path.join(msa_dir, "a3m")
-        mmseqs_dir = os.path.join(msa_dir, "mmseqs")
+        a3m_dir = os.path.abspath(os.path.join(msa_dir, "a3m"))
+        mmseqs_dir = os.path.abspath(os.path.join(msa_dir, "mmseqs"))
         os.makedirs(a3m_dir, exist_ok=True)
         # get MSAs
         sequences = [chain.sequence for chain in run.protein_chains]
@@ -771,8 +771,8 @@ def precompute_protenix_msas(
     ):
         # make the run's precomputed MSA directory
         msa_dir = os.path.join(base_output_path, run.name, "msas", "precomputed")
-        a3m_dir = os.path.join(msa_dir, "a3m")
-        mmseqs_dir = os.path.join(msa_dir, "mmseqs")
+        a3m_dir = os.path.abspath(os.path.join(msa_dir, "a3m"))
+        mmseqs_dir = os.path.abspath(os.path.join(msa_dir, "mmseqs"))
         os.makedirs(a3m_dir, exist_ok=True)
 
         # get MSAs
@@ -799,7 +799,8 @@ def precompute_protenix_msas(
                 f.write(non_pairing)
 
             # make the pairing MSA
-            pairing = ">query\n" + msa_string
+            query_seq = msa_string.split("\n")[1]
+            pairing = f">query\n{query_seq}"
             with open(os.path.join(msa_path, "pairing.a3m"), "w") as f:
                 f.write(pairing)
 
@@ -1023,9 +1024,9 @@ def precompute_chai_msas(
     ):
         # make the run's precomputed MSA directories
         msa_dir = os.path.join(base_output_path, run.name, "msas", "precomputed")
-        a3m_dir = os.path.join(msa_dir, "a3m")
-        pqt_dir = os.path.join(msa_dir, "pqt")
-        mmseqs_dir = os.path.join(msa_dir, "mmseqs")
+        a3m_dir = os.path.abspath(os.path.join(msa_dir, "a3m"))
+        pqt_dir = os.path.abspath(os.path.join(msa_dir, "pqt"))
+        mmseqs_dir = os.path.abspath(os.path.join(msa_dir, "mmseqs"))
         os.makedirs(a3m_dir, exist_ok=True)
         os.makedirs(pqt_dir, exist_ok=True)
         # get MSAs and convert to Chai's aligned parquet format
