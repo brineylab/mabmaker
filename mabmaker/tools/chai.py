@@ -20,6 +20,7 @@ from tqdm.auto import tqdm
 from ..utils.inputs import setup_structure_prediction_run
 from ..utils.jobs import SubThreadSilencer, get_gpu_queue, gpu_worker
 from ..utils.outputs import process_chai_output
+from .msa import precompute_chai_msas
 
 warnings.filterwarnings("ignore", category=DeprecationWarning)
 
@@ -32,6 +33,8 @@ def chai(
     gpus: int | Iterable[int] | None = None,
     use_msa_server: bool = True,
     msa_server_url: str = "https://api.colabfold.com",
+    use_msa_cache: bool = True,
+    msa_cache_dir: str = "~/.mabmaker/msa_cache",
     recycle_msa_subsample: int = 0,
     use_templates_server: bool = False,
     template_hits_path: str | None = None,
@@ -69,6 +72,15 @@ def chai(
     msa_server_url : str, optional, default="https://api.colabfold.com"
         The URL of the MSA server.
 
+    use_msa_cache : bool, optional, default=True
+        Whether to use the MSA cache. If ``True``, the cache will be checked for existing
+        MSAs before running ``mmseqs2``. If a sequence is not present in the cache, the
+        resulting MSA will be saved to the cache. If ``False``, ``mmseqs2`` will be run
+        for each sequence and the resulting MSAs will not be cached.
+
+    msa_cache_dir : str, optional, default="~/.mabmaker/msa_cache"
+        The path to the MSA cache directory.
+
     recycle_msa_subsample : int, optional, default=None
         Whether to subsample the MSA for each trunk recycle. If ``0``, no subsampling
         will be performed. If ``>0``, the MSA will be subsampled.
@@ -104,6 +116,16 @@ def chai(
     # setup runs
     runs = setup_structure_prediction_run(json_path, output_path)
 
+    # precompute MSAs
+    if use_msa_server and msa_directory is None:
+        runs = precompute_chai_msas(
+            runs=runs,
+            base_output_path=output_path,
+            msa_server_url=msa_server_url,
+            use_msa_cache=use_msa_cache,
+            msa_cache_dir=msa_cache_dir,
+        )
+
     # get GPU queue
     gpu_queue = get_gpu_queue(gpus)
     num_gpus = gpu_queue.qsize()
@@ -123,6 +145,7 @@ def chai(
         for run in runs:
             run_output_path = os.path.join(output_path, run.name, "raw_output")
             fasta_path, constraint_path = run.build_chai_input(run_output_path)
+            msa_directory = msa_directory or getattr(run, "msa_directory", None)
             for seed in run.seeds:
                 _output_path = os.path.join(run_output_path, f"seed_{seed}")
                 cmd = _build_chai_command(
@@ -271,12 +294,12 @@ def _build_chai_command(
     .. _Chai-1: https://github.com/chaidiscovery/chai-lab/tree/main?tab=readme-ov-file
 
     """
-    # # build Chai-formatted input files
-    # fasta_path, constraint_path = run.build_chai_input(os.path.dirname(output_path))
-
-    # embeddings vs MSA
+    # embeddings vs MSA server vs MSA directory
     if use_msa_server or msa_directory is not None:
         use_esm_embeddings = False
+        # msa_directory is exclusive with use_msa_server
+        if msa_directory is not None:
+            use_msa_server = False
     else:
         use_esm_embeddings = True
 
