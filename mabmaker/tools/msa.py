@@ -8,6 +8,7 @@ import logging
 import os
 import random
 import tarfile
+import tempfile
 import time
 from pathlib import Path
 from typing import List, Literal, Mapping, Tuple
@@ -47,7 +48,7 @@ TQDM_BAR_FORMAT = (
 def msa(
     sequences: str | list[str],
     output_dir: str,
-    prefix: str = "/tmp",
+    prefix: str | None = None,
     use_env: bool = True,
     use_filter: bool = True,
     filter: str | None = None,
@@ -73,7 +74,7 @@ def msa(
         The directory to save the output files. If `use_msa_cache` is `True` and MSAs are found
         in the cache, they will be copied into this directory.
 
-    prefix : str, optional, default="/tmp"
+    prefix : str, optional, default=tempfile.mkdtemp()
         The prefix for temporary output files. Passed directly to ``run_mmseqs2``.
 
     use_env : bool, optional, default=True
@@ -112,43 +113,92 @@ def msa(
 
     .. _ColabFold MMseqs2 API: https://github.com/sokrypton/ColabFold
     """
+
     if isinstance(sequences, str):
         sequences = [sequences]
+    if prefix is None:
+        prefix = tempfile.mkdtemp()
 
     msa_paths = []
-    for seq in sequences:
+    # placeholder to ensure msas are returned in input order
+    a3m_strings = [None] * len(sequences)
+    mmseqs2_sequences = []  # sequences that need to be run through MMseqs2
+    mmseqs2_slots = []  # indices of sequences needing MMseqs2
+
+    for i, seq in enumerate(sequences):
         # check the cache
-        msa_cache_dir = os.path.expanduser(msa_cache_dir)
-        a3m_string = (
-            retrieve_msa_from_cache(seq, msa_cache_dir) if use_msa_cache else None
+        a3m_string = None
+        if use_msa_cache:
+            a3m_string = retrieve_msa_from_cache(seq, msa_cache_dir)
+        if a3m_string is not None:
+            a3m_strings[i] = a3m_string
+        else:
+            mmseqs2_sequences.append(seq)
+            mmseqs2_slots.append(i)
+
+    # run MMseqs2 on sequences that need it
+    if mmseqs2_sequences:
+        a3m_lines = run_mmseqs2(
+            x=mmseqs2_sequences,
+            prefix=prefix,
+            use_env=use_env,
+            use_filter=use_filter,
+            use_templates=False,
+            filter=filter,
+            use_pairing=use_pairing,
+            pairing_strategy=pairing_strategy,
+            host_url=msa_server_url,
+            user_agent=user_agent,
+            quiet=quiet,
         )
-        # if the MSA is not in the cache (or we're not using the cache), run MMseqs2
-        if a3m_string is None:
-            a3m_lines = run_mmseqs2(
-                x=seq,
-                prefix=prefix,
-                use_env=use_env,
-                use_filter=use_filter,
-                use_templates=False,
-                filter=filter,
-                use_pairing=use_pairing,
-                pairing_strategy=pairing_strategy,
-                host_url=msa_server_url,
-                user_agent=user_agent,
-                quiet=quiet,
-            )
-            a3m_string = a3m_lines[0]
-            # save the MSA to the cache
-            if use_msa_cache:
-                save_msa(a3m_string, msa_cache_dir)
-        # copy the MSA from the cache to the output directory
+        for slot, a3m in zip(mmseqs2_slots, a3m_lines):
+            a3m_strings[slot] = a3m
+
+    for a3m_string in a3m_strings:
+        if use_msa_cache:
+            save_msa(a3m_string, msa_cache_dir)
         msa_path = save_msa(a3m_string, output_dir)
         msa_paths.append(msa_path)
 
-    if len(msa_paths) == 1:
-        return msa_paths[0]
-    else:
-        return msa_paths
+    return msa_paths
+
+    # if isinstance(sequences, str):
+    #     sequences = [sequences]
+
+    # msa_paths = []
+    # for seq in sequences:
+    #     # check the cache
+    #     msa_cache_dir = os.path.expanduser(msa_cache_dir)
+    #     a3m_string = (
+    #         retrieve_msa_from_cache(seq, msa_cache_dir) if use_msa_cache else None
+    #     )
+    #     # if the MSA is not in the cache (or we're not using the cache), run MMseqs2
+    #     if a3m_string is None:
+    #         a3m_lines = run_mmseqs2(
+    #             x=seq,
+    #             prefix=prefix,
+    #             use_env=use_env,
+    #             use_filter=use_filter,
+    #             use_templates=False,
+    #             filter=filter,
+    #             use_pairing=use_pairing,
+    #             pairing_strategy=pairing_strategy,
+    #             host_url=msa_server_url,
+    #             user_agent=user_agent,
+    #             quiet=quiet,
+    #         )
+    #         a3m_string = a3m_lines[0]
+    #         # save the MSA to the cache
+    #         if use_msa_cache:
+    #             save_msa(a3m_string, msa_cache_dir)
+    #     # copy the MSA from the cache to the output directory
+    #     msa_path = save_msa(a3m_string, output_dir)
+    #     msa_paths.append(msa_path)
+
+    # if len(msa_paths) == 1:
+    #     return msa_paths[0]
+    # else:
+    #     return msa_paths
 
 
 # This is a modified version of the `run_mmseqs2` function from the `colabfold` package.
@@ -678,12 +728,17 @@ def precompute_boltz_msas(
     ):
         # make the run's precomputed MSA directory
         a3m_dir = os.path.join(base_output_path, run.name, "msas", "precomputed", "a3m")
+        mmseqs_dir = os.path.join(
+            base_output_path, run.name, "msas", "precomputed", "mmseqs"
+        )
         os.makedirs(a3m_dir, exist_ok=True)
+        os.makedirs(mmseqs_dir, exist_ok=True)
         # get MSAs
         sequences = [chain.sequence for chain in run.protein_chains]
         msa_paths = msa(
             sequences=sequences,
             output_dir=a3m_dir,
+            prefix=mmseqs_dir,
             msa_server_url=msa_server_url,
             use_msa_cache=use_msa_cache,
             msa_cache_dir=msa_cache_dir,
@@ -748,13 +803,18 @@ def precompute_chai_msas(
         # make the run's precomputed MSA directories
         a3m_dir = os.path.join(base_output_path, run.name, "msas", "precomputed", "a3m")
         pqt_dir = os.path.join(base_output_path, run.name, "msas", "precomputed", "pqt")
+        mmseqs_dir = os.path.join(
+            base_output_path, run.name, "msas", "precomputed", "mmseqs"
+        )
         os.makedirs(a3m_dir, exist_ok=True)
         os.makedirs(pqt_dir, exist_ok=True)
+        os.makedirs(mmseqs_dir, exist_ok=True)
         # get MSAs and convert to Chai's aligned parquet format
         sequences = [chain.sequence for chain in run.protein_chains]
         msa_paths = msa(
             sequences=sequences,
             output_dir=a3m_dir,
+            prefix=mmseqs_dir,
             msa_server_url=msa_server_url,
             use_msa_cache=use_msa_cache,
             msa_cache_dir=msa_cache_dir,
