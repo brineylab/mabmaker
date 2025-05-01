@@ -676,15 +676,13 @@ def precompute_boltz_msas(
         bar_format="{desc}{percentage:3.0f}%|{bar:25}{r_bar}",
     ):
         # make the run's precomputed MSA directory
-        precomputed_a3m_dir = os.path.join(
-            base_output_path, run.name, "msas", "precomputed", "a3m"
-        )
-        abutils.io.make_dir(precomputed_a3m_dir)
+        a3m_dir = os.path.join(base_output_path, run.name, "msas", "precomputed", "a3m")
+        abutils.io.make_dir(a3m_dir)
         # get MSAs
         sequences = [chain.sequence for chain in run.protein_chains]
         msa_paths = msa(
             sequences=sequences,
-            output_dir=precomputed_a3m_dir,
+            output_dir=a3m_dir,
             use_msa_cache=use_msa_cache,
             msa_cache_dir=msa_cache_dir,
         )
@@ -698,7 +696,71 @@ def precompute_boltz_msas(
 #        Chai-1 MSAs
 # -----------------------------
 
-# adapted from https://github.com/chaidiscovery/chai-lab/blob/main/chai_lab/data/parsing/msas/aligned_pqt.py
+
+def precompute_chai_msas(
+    runs: list[StructurePredictionRun],
+    base_output_path: str,
+    use_msa_cache: bool = True,
+    msa_cache_dir: str = "~/.mabmaker/msa_cache",
+) -> list[StructurePredictionRun]:
+    """
+    Precompute MSAs for Chai-1 runs.
+
+    Parameters
+    ----------
+    runs : list[StructurePredictionRun]
+        The runs to precompute MSAs for. MSAs will be computed for each protein chain in
+        each run.
+
+    output_path : str
+        The path to the output directory. MSAs will be saved into a subdirectory called
+        ``msas/precomputed``. A3M files will be saved into a subdirectory called
+        ``a3m``, and aligned parquet files will be saved into a subdirectory called
+        ``parquet``.
+
+    use_msa_cache : bool, optional, default=True
+        Whether to use the MSA cache. If ``True``, the cache will be checked for existing
+        MSAs before running ``mmseqs2``. If a sequence is not present in the cache, the
+        resulting MSA will be saved to the cache. If ``False``, ``mmseqs2`` will be run
+        for each sequence and the resulting MSAs will not be cached.
+
+    msa_cache_dir : str, optional, default="~/.mabmaker/msa_cache"
+        The path to the MSA cache directory.
+
+    Returns
+    -------
+    list[StructurePredictionRun]
+        The run objects with precomputed MSA file paths added to the ``msa`` attribute
+        of each protein chain.
+
+    """
+    for run in tqdm(
+        runs,
+        desc="precomputing MSAs: ",
+        bar_format="{desc}{percentage:3.0f}%|{bar:25}{r_bar}",
+    ):
+        # make the run's precomputed MSA directories
+        a3m_dir = os.path.join(base_output_path, run.name, "msas", "precomputed", "a3m")
+        pqt_dir = os.path.join(base_output_path, run.name, "msas", "precomputed", "pqt")
+        abutils.io.make_dir(a3m_dir)
+        abutils.io.make_dir(pqt_dir)
+        # get MSAs and convert to Chai's aligned parquet format
+        sequences = [chain.sequence for chain in run.protein_chains]
+        msa_paths = msa(
+            sequences=sequences,
+            output_dir=a3m_dir,
+            use_msa_cache=use_msa_cache,
+            msa_cache_dir=msa_cache_dir,
+        )
+        process_a3ms_for_chai(msa_paths, pqt_dir)
+        # set the MSA directory
+        run.msa_dir = pqt_dir
+
+    return runs
+
+
+# the following functions are adapted from:
+# https://github.com/chaidiscovery/chai-lab/blob/main/chai_lab/data/parsing/msas/aligned_pqt.py
 
 
 @typecheck
