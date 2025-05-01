@@ -121,11 +121,11 @@ def msa(
     for seq in sequences:
         # check the cache
         msa_cache_dir = os.path.expanduser(msa_cache_dir)
-        cache_path = (
+        a3m_string = (
             retrieve_msa_from_cache(seq, msa_cache_dir) if use_msa_cache else None
         )
         # if the MSA is not in the cache (or we're not using the cache), run MMseqs2
-        if cache_path is None:
+        if a3m_string is None:
             a3m_lines = run_mmseqs2(
                 x=seq,
                 prefix=prefix,
@@ -139,16 +139,13 @@ def msa(
                 user_agent=user_agent,
                 quiet=quiet,
             )
+            a3m_string = a3m_lines[0]
             # save the MSA to the cache
             if use_msa_cache:
-                cache_path = save_msa(a3m_lines[0], msa_cache_dir)
-            # save the MSA to the output directory
-            msa_path = save_msa(a3m_lines[0], output_dir)
-            msa_paths.append(msa_path)
-        else:
-            # copy the MSA from the cache to the output directory
-            msa_path = shutil.copy(cache_path, output_dir)
-            msa_paths.append(msa_path)
+                save_msa(a3m_string, msa_cache_dir)
+        # copy the MSA from the cache to the output directory
+        msa_path = save_msa(a3m_string, output_dir)
+        msa_paths.append(msa_path)
 
     if len(msa_paths) == 1:
         return msa_paths[0]
