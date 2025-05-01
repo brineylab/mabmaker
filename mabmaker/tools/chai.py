@@ -300,6 +300,7 @@ def _build_chai_command(
         # msa_directory is exclusive with use_msa_server
         if msa_directory is not None:
             use_msa_server = False
+            msa_directory = Path(msa_directory)
     else:
         use_esm_embeddings = True
 
