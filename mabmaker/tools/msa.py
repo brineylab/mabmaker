@@ -55,7 +55,7 @@ def msa(
     filter: str | None = None,
     use_pairing: bool = False,
     pairing_strategy: str = "greedy",
-    msa_server: str = "https://api.colabfold.com",
+    msa_server_url: str = "https://api.colabfold.com",
     user_agent: str = f"mabmaker/{__version__} briney@scripps.edu",
     use_msa_cache: bool = True,
     msa_cache_dir: str = "~/.mabmaker/msa_cache",
@@ -90,8 +90,8 @@ def msa(
     pairing_strategy : str, optional, default="greedy"
         The pairing strategy to use. Passed directly to ``run_mmseqs2``.
 
-    msa_server : str, optional, default="https://api.colabfold.com"
-        The URL of the MMseqs2 API. Passed directly to ``run_mmseqs2``.
+    msa_server_url : str, optional, default="https://api.colabfold.com"
+        The URL of the MSA server. Passed to the ``host_url`` argument of ``run_mmseqs2``.
 
     user_agent : str, optional, default="mabmaker/{__version__} briney@scripps.edu"
         The user agent to use. Passed directly to ``run_mmseqs2``.
@@ -134,7 +134,7 @@ def msa(
                 filter=filter,
                 use_pairing=use_pairing,
                 pairing_strategy=pairing_strategy,
-                msa_server=msa_server,
+                host_url=msa_server_url,
                 user_agent=user_agent,
                 quiet=quiet,
             )
@@ -641,6 +641,7 @@ def save_msa(
 def precompute_boltz_msas(
     runs: list[StructurePredictionRun],
     base_output_path: str,
+    msa_server_url: str = "https://api.colabfold.com",
     use_msa_cache: bool = True,
     msa_cache_dir: str = "~/.mabmaker/msa_cache",
 ) -> list[StructurePredictionRun]:
@@ -686,6 +687,7 @@ def precompute_boltz_msas(
         msa_paths = msa(
             sequences=sequences,
             output_dir=a3m_dir,
+            msa_server_url=msa_server_url,
             use_msa_cache=use_msa_cache,
             msa_cache_dir=msa_cache_dir,
         )
@@ -703,6 +705,7 @@ def precompute_boltz_msas(
 def precompute_chai_msas(
     runs: list[StructurePredictionRun],
     base_output_path: str,
+    msa_server_url: str = "https://api.colabfold.com",
     use_msa_cache: bool = True,
     msa_cache_dir: str = "~/.mabmaker/msa_cache",
 ) -> list[StructurePredictionRun]:
@@ -752,12 +755,13 @@ def precompute_chai_msas(
         msa_paths = msa(
             sequences=sequences,
             output_dir=a3m_dir,
+            msa_server_url=msa_server_url,
             use_msa_cache=use_msa_cache,
             msa_cache_dir=msa_cache_dir,
         )
         process_a3ms_for_chai(msa_paths, pqt_dir)
         # set the MSA directory
-        run.msa_dir = pqt_dir
+        run.msa_directory = pqt_dir
 
     return runs
 
