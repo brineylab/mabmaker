@@ -15,6 +15,7 @@ from tqdm.auto import tqdm
 from ..utils.inputs import StructurePredictionRun, setup_structure_prediction_run
 from ..utils.jobs import get_gpu_queue, gpu_worker
 from ..utils.outputs import process_boltz_output
+from .msa import precompute_boltz_msas
 
 warnings.filterwarnings("ignore", category=DeprecationWarning)
 
@@ -27,6 +28,8 @@ def boltz(
     gpus: int | Iterable[int] | None = None,
     use_msa_server: bool = True,
     msa_server_url: str = "https://api.colabfold.com",
+    use_msa_cache: bool = True,
+    msa_cache_dir: str = "~/.mabmaker/msa_cache",
     recycling_steps: int = 3,
     sampling_steps: int = 200,
     diffusion_samples: int = 5,
@@ -64,6 +67,15 @@ def boltz(
 
     msa_server_url : str, optional, default="https://api.colabfold.com"
         The URL of the MSA server.
+
+    use_msa_cache : bool, optional, default=True
+        Whether to use the MSA cache. If ``True``, the cache will be checked for existing
+        MSAs before running ``mmseqs2``. If a sequence is not present in the cache, the
+        resulting MSA will be saved to the cache. If ``False``, ``mmseqs2`` will be run
+        for each sequence and the resulting MSAs will not be cached.
+
+    msa_cache_dir : str, optional, default="~/.mabmaker/msa_cache"
+        The path to the MSA cache directory.
 
     recycling_steps : int, optional, default=3
         The number of recycling steps.
@@ -104,6 +116,9 @@ def boltz(
     """
     # setup runs
     runs = setup_structure_prediction_run(json_path, output_path)
+
+    # MSAs
+    runs = precompute_boltz_msas(runs, output_path, msa_cache_dir)
 
     # get GPU queue
     gpu_queue = get_gpu_queue(gpus)
