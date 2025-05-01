@@ -120,6 +120,7 @@ def msa(
     msa_paths = []
     for seq in sequences:
         # check the cache
+        msa_cache_dir = os.path.expanduser(msa_cache_dir)
         cache_path = (
             retrieve_msa_from_cache(seq, msa_cache_dir) if use_msa_cache else None
         )
