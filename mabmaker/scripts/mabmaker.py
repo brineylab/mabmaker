@@ -224,15 +224,56 @@ def ligandmpnn(
     help="GPU(s) to use, for example '0' or '0,1'. If not provided, all available GPUs will be used.",
 )
 @click.option(
-    "--use_msa_server/--use_esm_embeddings",
+    "--use_msa_server/--no_msa_server",
     default=True,
     help="Use the MSA server to get the MSA.",
+)
+@click.option(
+    "--msa_server_url",
+    type=str,
+    default="https://api.colabfold.com",
+    help="The URL of the MSA server.",
+)
+@click.option(
+    "--use_msa_cache/--no_use_msa_cache",
+    default=True,
+    help="Whether to use the MSA cache.",
+)
+@click.option(
+    "--msa_cache_dir",
+    type=str,
+    default="~/.mabmaker/msa_cache",
+    help="The path to the MSA cache directory.",
+)
+@click.option(
+    "--num_trunk_recycles",
+    type=int,
+    default=4,
+    help="The number of trunk recycles to perform.",
+)
+@click.option(
+    "--num_diffusion_timesteps",
+    type=int,
+    default=200,
+    help="The number of diffusion timesteps to use.",
+)
+@click.option(
+    "--num_diffusion_samples",
+    type=int,
+    default=5,
+    help="The number of diffusion samples to generate.",
 )
 def protenix(
     json_path: str,
     output_path: str,
     gpus: int | Iterable[int] | None = None,
     use_msa_server: bool = True,
+    msa_server_url: str = "https://api.colabfold.com",
+    use_msa_cache: bool = True,
+    msa_cache_dir: str = "~/.mabmaker/msa_cache",
+    num_trunk_recycles: int = 4,
+    num_diffusion_timesteps: int = 200,
+    num_diffusion_samples: int = 5,
 ) -> None:
     """
     Structure prediction with Protenix.
@@ -242,6 +283,12 @@ def protenix(
         output_path=output_path,
         gpus=gpus,
         use_msa_server=use_msa_server,
+        msa_server_url=msa_server_url,
+        use_msa_cache=use_msa_cache,
+        msa_cache_dir=msa_cache_dir,
+        num_trunk_recycles=num_trunk_recycles,
+        num_diffusion_timesteps=num_diffusion_timesteps,
+        num_diffusion_samples=num_diffusion_samples,
     )
 
 
@@ -265,7 +312,7 @@ def protenix(
     help="GPU(s) to use, for example '0' or '0,1'. If not provided, all available GPUs will be used.",
 )
 @click.option(
-    "--use_msa_server/--no_use_msa_server",
+    "--use_msa_server/--no_msa_server",
     default=True,
     help="Use the MSA server to get the MSA.",
 )
@@ -276,7 +323,7 @@ def protenix(
     help="The URL of the MSA server.",
 )
 @click.option(
-    "--use_msa_cache/--no_use_msa_cache",
+    "--use_msa_cache/--no_msa_cache",
     default=True,
     help="Whether to use the MSA cache.",
 )
@@ -401,7 +448,7 @@ def chai(
     help="GPU(s) to use, for example '0' or '0,1'. If not provided, all available GPUs will be used.",
 )
 @click.option(
-    "--use_msa_server/--no_use_msa_server",
+    "--use_msa_server/--no_msa_server",
     default=True,
     help="Whether to use the MSA server.",
 )
@@ -412,7 +459,7 @@ def chai(
     help="The URL of the MSA server.",
 )
 @click.option(
-    "--use_msa_cache/--no_use_msa_cache",
+    "--use_msa_cache/--no_msa_cache",
     default=True,
     help="Whether to use the MSA cache.",
 )
