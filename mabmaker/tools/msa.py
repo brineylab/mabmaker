@@ -30,7 +30,14 @@ from tqdm.auto import tqdm
 from ..utils.inputs import StructurePredictionRun
 from ..version import __version__
 
-__all__ = ["msa", "run_mmseqs2", "process_a3ms_for_chai"]
+__all__ = [
+    "msa",
+    "run_mmseqs2",
+    "process_a3ms_for_chai",
+    "hash_sequence",
+    "retrieve_msa_from_cache",
+    "save_msa",
+]
 
 logger = logging.getLogger(__name__)
 
