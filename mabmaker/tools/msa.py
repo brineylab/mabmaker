@@ -626,6 +626,7 @@ def save_msa(
     seq_hash = hash_sequence(seq)
 
     # save the MSA
+    abutils.io.make_dir(destination_dir)
     msa_path = os.path.join(destination_dir, f"{seq_hash}.a3m")
     with open(msa_path, "w") as f:
         f.write(msa)
