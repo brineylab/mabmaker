@@ -141,10 +141,9 @@ def msa(
             )
             # save the MSA to the cache
             if use_msa_cache:
-                for a3m_string in a3m_lines:
-                    cache_path = save_msa(a3m_string, msa_cache_dir)
+                cache_path = save_msa(a3m_lines[0], msa_cache_dir)
             # save the MSA to the output directory
-            msa_path = save_msa(a3m_lines, output_dir)
+            msa_path = save_msa(a3m_lines[0], output_dir)
             msa_paths.append(msa_path)
         else:
             # copy the MSA from the cache to the output directory
