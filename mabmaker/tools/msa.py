@@ -154,8 +154,9 @@ def msa(
         for slot, a3m in zip(mmseqs2_slots, a3m_lines):
             a3m_strings[slot] = a3m
 
-    for a3m_string in a3m_strings:
-        if use_msa_cache:
+    for i, a3m_string in enumerate(a3m_strings):
+        if use_msa_cache and i in mmseqs2_slots:
+            # only cache sequences that aren't already in the cache
             save_msa(a3m_string, msa_cache_dir)
         msa_path = save_msa(a3m_string, output_dir)
         msa_paths.append(msa_path)
