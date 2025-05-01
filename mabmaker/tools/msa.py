@@ -690,6 +690,9 @@ def precompute_boltz_msas(
             use_msa_cache=use_msa_cache,
             msa_cache_dir=msa_cache_dir,
         )
+        if isinstance(msa_paths, str):
+            msa_paths = [msa_paths]
+        # add MSA paths to the run's protein chains
         for chain, msa_path in zip(run.protein_chains, msa_paths):
             chain.msa = msa_path
 
@@ -758,8 +761,10 @@ def precompute_chai_msas(
             use_msa_cache=use_msa_cache,
             msa_cache_dir=msa_cache_dir,
         )
+        if isinstance(msa_paths, str):
+            msa_paths = [msa_paths]
+        # process the MSAs
         process_a3ms_for_chai(msa_paths, pqt_dir)
-        # set the MSA directory
         run.msa_directory = pqt_dir
 
     return runs
