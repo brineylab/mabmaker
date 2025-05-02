@@ -3,10 +3,12 @@
 # SPDX-License-Identifier: MIT
 
 import glob
+import json
 import os
 import shutil
 
 import abutils
+import matplotlib.pyplot as plt
 import numpy as np
 from chai_lab.chai1 import StructureCandidates
 
@@ -96,30 +98,34 @@ def process_boltz_output(
         os.path.join(original_path, "*", "predictions", "*", "pde*.npz")
     ):
         model_num = os.path.basename(pde_path).split("_")[-1].split(".")[0]
-        shutil.copy(
-            pde_path,
-            os.path.join(metrics_path, "pde", f"{seed}|{model_num}|{run_name}.npz"),
-        )
+        pde_data = np.load(pde_path)["pde"]
+        npy_file = f"{seed}|{model_num}|{run_name}.npy"
+        with open(os.path.join(metrics_path, "pde", npy_file), "wb") as f:
+            np.save(f, pde_data)
+        plot_file = f"{seed}|{model_num}|{run_name}.pdf"
+        plot_pde(pde_data, os.path.join(metrics_path, "pde", plot_file))
 
     # copy metrics -- pae
     for pae_path in glob.glob(
         os.path.join(original_path, "*", "predictions", "*", "pae*.npz")
     ):
         model_num = os.path.basename(pae_path).split("_")[-1].split(".")[0]
-        shutil.copy(
-            pae_path,
-            os.path.join(metrics_path, "pae", f"{seed}|{model_num}|{run_name}.npz"),
-        )
+        pae_data = np.load(pae_path)["pae"]
+        npy_file = f"{seed}|{model_num}|{run_name}.npy"
+        with open(os.path.join(metrics_path, "pae", npy_file), "wb") as f:
+            np.save(f, pae_data)
+        plot_file = f"{seed}|{model_num}|{run_name}.pdf"
+        plot_pae(pae_data, os.path.join(metrics_path, "pae", plot_file))
 
     # copy metrics -- plddt
     for plddt_path in glob.glob(
         os.path.join(original_path, "*", "predictions", "*", "plddt*.npz")
     ):
         model_num = os.path.basename(plddt_path).split("_")[-1].split(".")[0]
-        shutil.copy(
-            plddt_path,
-            os.path.join(metrics_path, "plddt", f"{seed}|{model_num}|{run_name}.npz"),
-        )
+        plddt_data = np.load(plddt_path)["plddt"]
+        npy_file = f"{seed}|{model_num}|{run_name}.npy"
+        with open(os.path.join(metrics_path, "plddt", npy_file), "wb") as f:
+            np.save(f, plddt_data)
 
     # copy msas
     abutils.io.make_dir(os.path.join(msas_path, seed))
@@ -160,6 +166,8 @@ def process_chai_output(
     processed_path: str,
     run_name: str,
     seed: int | str,
+    stdout: str | None = None,
+    stderr: str | None = None,
 ) -> None:
     """
     Process the outputs of a Chai-1 prediction. The predictions and confidence scores
@@ -189,6 +197,7 @@ def process_chai_output(
     predictions_path = _get_predictions_path(processed_path)
     metrics_path = _get_metrics_path(processed_path)
     msas_path = _get_msas_path(processed_path)
+    logs_path = _get_logs_path(processed_path)
 
     # copy predictions
     for model_path in glob.glob(os.path.join(original_path, "pred.model_idx_*.cif")):
@@ -213,20 +222,27 @@ def process_chai_output(
     # write metrics -- pde
     pde_scores = result.pde.numpy()
     for i, pde_score in enumerate(pde_scores):
-        npz_file = os.path.join(metrics_path, "pde", f"{seed}|{i}|{run_name}.npz")
-        np.savez(npz_file, pde_score)
+        npy_file = os.path.join(metrics_path, "pde", f"{seed}|{i}|{run_name}.npy")
+        with open(npy_file, "wb") as f:
+            np.save(f, pde_score)
+        plot_file = os.path.join(metrics_path, "pde", f"{seed}|{i}|{run_name}.pdf")
+        plot_pde(pde_score, plot_file)
 
     # write metrics -- pae
     pae_scores = result.pae.numpy()
     for i, pae_score in enumerate(pae_scores):
-        npz_file = os.path.join(metrics_path, "pae", f"{seed}|{i}|{run_name}.npz")
-        np.savez(npz_file, pae_score)
+        npy_file = os.path.join(metrics_path, "pae", f"{seed}|{i}|{run_name}.npy")
+        with open(npy_file, "wb") as f:
+            np.save(f, pae_score)
+        plot_file = os.path.join(metrics_path, "pae", f"{seed}|{i}|{run_name}.pdf")
+        plot_pae(pae_score, plot_file)
 
     # write metrics -- plddt
     plddt_scores = result.plddt.numpy()
     for i, plddt_score in enumerate(plddt_scores):
-        npz_file = os.path.join(metrics_path, "plddt", f"{seed}|{i}|{run_name}.npz")
-        np.savez(npz_file, plddt_score)
+        npy_file = os.path.join(metrics_path, "plddt", f"{seed}|{i}|{run_name}.npy")
+        with open(npy_file, "wb") as f:
+            np.save(f, plddt_score)
 
     # copy msas
     abutils.io.make_dir(os.path.join(msas_path, seed))
@@ -239,6 +255,15 @@ def process_chai_output(
         os.path.join(original_path, "msa_depth.pdf"),
         os.path.join(msas_path, seed, "msa_depth.pdf"),
     )
+
+    # write logs
+    abutils.io.make_dir(os.path.join(logs_path, seed))
+    if stdout is not None:
+        with open(os.path.join(logs_path, seed, "stdout.log"), "w") as f:
+            f.write(stdout)
+    if stderr is not None:
+        with open(os.path.join(logs_path, seed, "stderr.log"), "w") as f:
+            f.write(stderr)
 
 
 def process_protenix_output(
@@ -314,6 +339,34 @@ def process_protenix_output(
             ),
         )
 
+    # copy metrics -- "full data"
+    for full_data_path in glob.glob(
+        os.path.join(original_path, "*", "*", "predictions", "*_full_data_*.json")
+    ):
+        model_num = os.path.basename(full_data_path).split("_")[-1].split(".")[0]
+        seed = os.path.basename(full_data_path).split("_")[-5]
+        with open(full_data_path, "r") as f:
+            metrics_data = json.load(f)
+        npy_file = f"{seed}|{model_num}|{run_name}.npy"
+        plot_file = f"{seed}|{model_num}|{run_name}.pdf"
+
+        # pLDDT
+        plddt_scores = np.array(metrics_data["atom_plddt"])
+        with open(os.path.join(metrics_path, "plddt", npy_file), "wb") as f:
+            np.save(f, plddt_scores)
+
+        # PAE
+        pae_scores = np.array(metrics_data["token_pair_pae"])
+        plot_pae(pae_scores, os.path.join(metrics_path, "pae", plot_file))
+        with open(os.path.join(metrics_path, "pae", npy_file), "wb") as f:
+            np.save(f, pae_scores)
+
+        # PDE
+        pde_scores = np.array(metrics_data["token_pair_pde"])
+        plot_pde(pde_scores, os.path.join(metrics_path, "pde", plot_file))
+        with open(os.path.join(metrics_path, "pde", npy_file), "wb") as f:
+            np.save(f, pde_scores)
+
     # copy msas
     for msa_path in glob.glob(os.path.join(original_path, "*", "msa_resmsa_*")):
         if os.path.isdir(msa_path):
@@ -385,3 +438,128 @@ def _get_raw_output_path(base_path: str) -> str:
     Get the path to the raw output directory.
     """
     return os.path.join(base_path, "raw_output")
+
+
+# ---------------------------------
+#             Plots
+# ---------------------------------
+
+
+def plot_pae(
+    pae: np.ndarray,
+    output_file: str | None = None,
+    cmap: str = "Greens_r",
+    show_cbar: bool = True,
+) -> plt.Figure | None:
+    """
+    Plot a Predicted Alignment Error (PAE) heatmap.
+
+    Parameters
+    ----------
+    pae : np.ndarray, shape (N, N)
+        The PAE matrix.
+
+    output_file : str
+        Path to the output (figure) file. If not provided,
+        the ``plt.Figure`` object is returned.
+
+    cmap : str, optional
+        Matplotlib colormap to use.
+
+    show_cbar : bool, default=True
+        If True, show the colorbar.
+
+    Returns
+    -------
+    None
+    """
+    # plot
+    fig, ax = plt.subplots(figsize=(6, 5))
+    im = ax.imshow(
+        pae, origin="upper", interpolation="nearest", cmap=cmap, vmin=0, aspect="equal"
+    )
+    for s in ["top", "bottom", "left", "right"]:
+        ax.spines[s].set_visible(False)
+
+    # color bar
+    if show_cbar:
+        cbar = fig.colorbar(
+            im,
+            ax=ax,
+            fraction=0.046,
+            pad=0.04,
+        )
+        cbar.set_label("PAE (Å)", rotation=270, labelpad=15, fontsize=13)
+        cbar.ax.invert_yaxis()
+        cbar.outline.set_visible(False)
+
+    # no ticks
+    ticks = []
+    ax.set_xticks(ticks)
+    ax.set_yticks(ticks)
+
+    plt.tight_layout()
+    if output_file is not None:
+        plt.savefig(output_file)
+    else:
+        return fig
+
+
+def plot_pde(
+    pde: np.ndarray,
+    output_file: str | None = None,
+    cmap: str = "Blues_r",
+    show_cbar: bool = True,
+) -> plt.Figure | None:
+    """
+    Plot a Predicted Distance Error (PDE) heatmap.
+
+    Parameters
+    ----------
+    pde : np.ndarray, shape (N, N)
+        The PDE matrix.
+
+    output_file : str
+        Path to the output (figure) file. If not provided,
+        the ``plt.Figure`` object is returned.
+
+    cmap : str, optional
+        Matplotlib colormap to use.
+
+    show_cbar : bool, default=True
+        If True, show the colorbar.
+
+    Returns
+    -------
+    None
+    """
+    # plot
+    fig, ax = plt.subplots(figsize=(6, 5))
+    im = ax.imshow(
+        pde, origin="upper", interpolation="nearest", cmap=cmap, vmin=0, aspect="equal"
+    )
+    for s in ["top", "bottom", "left", "right"]:
+        ax.spines[s].set_visible(False)
+
+    # color bar
+    if show_cbar:
+        cbar = fig.colorbar(
+            im,
+            ax=ax,
+            fraction=0.046,
+            pad=0.04,
+        )
+        cbar.set_label("PDE (Å)", rotation=270, labelpad=15, fontsize=13)
+        cbar.ax.invert_yaxis()
+        cbar.outline.set_visible(False)
+
+    # no ticks
+    ticks = []
+    ax.set_xticks(ticks)
+    ax.set_yticks(ticks)
+
+    plt.tight_layout()
+    if output_file is not None:
+        plt.savefig(output_file)
+    else:
+        return fig

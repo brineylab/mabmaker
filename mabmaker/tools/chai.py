@@ -4,7 +4,12 @@
 
 
 import concurrent.futures as cf
+import multiprocessing as mp
 import os
+import shutil
+import sys
+import threading
+import warnings
 from functools import partial
 from pathlib import Path
 from typing import Iterable
@@ -13,8 +18,11 @@ from chai_lab.chai1 import run_inference
 from tqdm.auto import tqdm
 
 from ..utils.inputs import setup_structure_prediction_run
-from ..utils.jobs import get_gpu_queue, gpu_worker
+from ..utils.jobs import SubThreadSilencer, get_gpu_queue, gpu_worker
 from ..utils.outputs import process_chai_output
+from .msa import precompute_chai_msas
+
+warnings.filterwarnings("ignore", category=DeprecationWarning)
 
 __all__ = ["chai"]
 
@@ -25,6 +33,8 @@ def chai(
     gpus: int | Iterable[int] | None = None,
     use_msa_server: bool = True,
     msa_server_url: str = "https://api.colabfold.com",
+    use_msa_cache: bool = True,
+    msa_cache_dir: str = "~/.mabmaker/msa_cache",
     recycle_msa_subsample: int = 0,
     use_templates_server: bool = False,
     template_hits_path: str | None = None,
@@ -34,6 +44,7 @@ def chai(
     num_diffusion_timesteps: int = 200,
     num_diffusion_samples: int = 5,
     low_memory: bool = False,
+    compress_output: bool = False,
 ) -> None:
     """
     Structure prediction with `Chai-1`_.
@@ -61,6 +72,15 @@ def chai(
 
     msa_server_url : str, optional, default="https://api.colabfold.com"
         The URL of the MSA server.
+
+    use_msa_cache : bool, optional, default=True
+        Whether to use the MSA cache. If ``True``, the cache will be checked for existing
+        MSAs before running ``mmseqs2``. If a sequence is not present in the cache, the
+        resulting MSA will be saved to the cache. If ``False``, ``mmseqs2`` will be run
+        for each sequence and the resulting MSAs will not be cached.
+
+    msa_cache_dir : str, optional, default="~/.mabmaker/msa_cache"
+        The path to the MSA cache directory.
 
     recycle_msa_subsample : int, optional, default=None
         Whether to subsample the MSA for each trunk recycle. If ``0``, no subsampling
@@ -90,6 +110,11 @@ def chai(
     low_memory : bool, optional, default=False
         Whether to use low memory mode.
 
+    compress_output : bool, optional, default=False
+        Whether to compress the output directory. If `True`, the output directory will
+        be compressed into a gzipped tarball with the extension ``.tar.gz`` and located
+        in the output directory.
+
     .. _Chai-1: https://github.com/chaidiscovery/chai-lab/tree/main?tab=readme-ov-file
     .. _AlphaFold3 input JSON file: https://github.com/google-deepmind/alphafold/tree/main/server
 
@@ -97,9 +122,27 @@ def chai(
     # setup runs
     runs = setup_structure_prediction_run(json_path, output_path)
 
+    # precompute MSAs
+    if use_msa_server and msa_directory is None:
+        runs = precompute_chai_msas(
+            runs=runs,
+            base_output_path=output_path,
+            msa_server_url=msa_server_url,
+            use_msa_cache=use_msa_cache,
+            msa_cache_dir=msa_cache_dir,
+        )
+
     # get GPU queue
     gpu_queue = get_gpu_queue(gpus)
     num_gpus = gpu_queue.qsize()
+
+    # silence stdout and stderr for all threads except the main thread
+    # because Chai-1 prints a lot of stuff to stdout and stderr
+    original_stdout = sys.stdout
+    original_stderr = sys.stderr
+    main_thread = threading.current_thread()
+    sys.stdout = SubThreadSilencer(sys.stdout, main_thread)
+    sys.stderr = SubThreadSilencer(sys.stderr, main_thread)
 
     # run predictions
     futures = []
@@ -108,6 +151,7 @@ def chai(
         for run in runs:
             run_output_path = os.path.join(output_path, run.name, "raw_output")
             fasta_path, constraint_path = run.build_chai_input(run_output_path)
+            msa_directory = msa_directory or getattr(run, "msa_directory", None)
             for seed in run.seeds:
                 _output_path = os.path.join(run_output_path, f"seed_{seed}")
                 cmd = _build_chai_command(
@@ -127,13 +171,19 @@ def chai(
                     num_diffusion_samples=num_diffusion_samples,
                     low_memory=low_memory,
                 )
-                futures.append(executor.submit(gpu_worker, cmd, gpu_queue))
+                futures.append(
+                    executor.submit(
+                        gpu_worker,
+                        cmd,
+                        gpu_queue,
+                    )
+                )
                 output_paths.append(_output_path)
 
         # monitor progress
         with tqdm(
             total=len(futures),
-            desc="Chai-1",
+            desc="Chai-1: ",
             bar_format="{desc}{percentage:3.0f}%|{bar:25}{r_bar}",
         ) as pbar:
             for _ in cf.as_completed(futures):
@@ -153,6 +203,33 @@ def chai(
                 seed=seed,
             )
             run_idx += 1
+
+    # stdout and stderr logs
+    stdout_logs = sys.stdout.get_logs()
+    stderr_logs = sys.stderr.get_logs()
+
+    # restore stdout and stderr
+    sys.stdout = original_stdout
+    sys.stderr = original_stderr
+
+    # write stdout and stderr logs
+    log_path = os.path.join(output_path, "logs")
+    os.makedirs(log_path, exist_ok=True)
+    with open(os.path.join(log_path, "stdout.log"), "w") as fh:
+        for tid, text in stdout_logs.items():
+            fh.write(f"--- output from thread {tid} ---\n{text}\n")
+    with open(os.path.join(log_path, "stderr.log"), "w") as fh:
+        for tid, text in stderr_logs.items():
+            fh.write(f"--- output from thread {tid} ---\n{text}\n")
+
+    # compress output
+    if compress_output:
+        for run in runs:
+            shutil.make_archive(
+                base_name=os.path.join(output_path, run.name),
+                format="gztar",
+                root_dir=os.path.join(output_path, run.name),
+            )
 
 
 def _build_chai_command(
@@ -232,12 +309,13 @@ def _build_chai_command(
     .. _Chai-1: https://github.com/chaidiscovery/chai-lab/tree/main?tab=readme-ov-file
 
     """
-    # # build Chai-formatted input files
-    # fasta_path, constraint_path = run.build_chai_input(os.path.dirname(output_path))
-
-    # embeddings vs MSA
+    # embeddings vs MSA server vs MSA directory
     if use_msa_server or msa_directory is not None:
         use_esm_embeddings = False
+        # msa_directory is exclusive with use_msa_server
+        if msa_directory is not None:
+            use_msa_server = False
+            msa_directory = Path(msa_directory)
     else:
         use_esm_embeddings = True
 

@@ -7,6 +7,7 @@ import json
 import os
 import re
 import shutil
+import warnings
 
 # import subprocess as sp
 from dataclasses import dataclass
@@ -20,6 +21,8 @@ from natsort import natsorted
 from tqdm.auto import tqdm
 
 from ..utils.jobs import get_gpu_queue, gpu_worker
+
+warnings.filterwarnings("ignore", category=DeprecationWarning)
 
 __all__ = ["ligandmpnn", "expand_residue_ranges"]
 
@@ -254,7 +257,7 @@ def ligandmpnn(
 
     """
     # output directory
-    abutils.io.make_dir(output_dir)
+    os.makedirs(output_dir, exist_ok=True)
 
     # setup logging
     global logger
@@ -493,7 +496,7 @@ def ligandmpnn(
         # monitor progress
         with tqdm(
             total=len(futures),
-            desc="LigandMPNN",
+            desc="LigandMPNN: ",
             bar_format="{desc}{percentage:3.0f}%|{bar:25}{r_bar}",
         ) as pbar:
             for _ in concurrent.futures.as_completed(futures):

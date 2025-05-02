@@ -8,7 +8,7 @@ pyyaml
 requests
 torch
 tqdm
-# models
-boltz
-chai_lab
-protenix
+# # models
+# boltz
+# chai_lab
+# protenix

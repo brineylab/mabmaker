@@ -2,20 +2,40 @@
 # Distributed under the terms of the MIT License.
 # SPDX-License-Identifier: MIT
 
-# This is a modified version of the `run_mmseqs2` function from the `colabfold` package.
-# https://github.com/sokrypton/ColabFold/blob/main/colabfold/colabfold.py
 
+import hashlib
 import logging
 import os
 import random
 import tarfile
+import tempfile
 import time
-from typing import List, Tuple
+from pathlib import Path
+from typing import Dict, List, Literal, Mapping, Tuple
 
+import pandas as pd
 import requests
+from chai_lab.data.parsing.msas.aligned_pqt import (
+    a3m_to_aligned_dataframe,
+    expected_basename,
+)
+from chai_lab.data.parsing.msas.data_source import MSADataSource
+from chai_lab.utils.typing import typecheck
 from tqdm.auto import tqdm
 
-__all__ = ["run_mmseqs2"]
+from ..utils.inputs import StructurePredictionRun
+from ..version import __version__
+
+__all__ = [
+    "msa",
+    "run_mmseqs2",
+    "process_a3ms_for_chai",
+    "hash_sequence",
+    "retrieve_msa_from_cache",
+    "save_msa",
+    "precompute_boltz_msas",
+    "precompute_chai_msas",
+]
 
 logger = logging.getLogger(__name__)
 
@@ -23,6 +43,139 @@ logger = logging.getLogger(__name__)
 TQDM_BAR_FORMAT = (
     "{l_bar}{bar}| {n_fmt}/{total_fmt} [elapsed: {elapsed} remaining: {remaining}]"
 )
+
+
+def msa(
+    sequences: str | list[str],
+    output_dir: str | None = None,
+    prefix: str | None = None,
+    use_env: bool = True,
+    use_filter: bool = True,
+    filter: str | None = None,
+    use_pairing: bool = False,
+    pairing_strategy: str = "greedy",
+    msa_server_url: str = "https://api.colabfold.com",
+    user_agent: str = f"mabmaker/{__version__} briney@scripps.edu",
+    use_msa_cache: bool = True,
+    msa_cache_dir: str = "~/.mabmaker/msa_cache",
+    quiet: bool = True,
+) -> str | list[str]:
+    f"""
+    Perform a multiple sequence alignment using the `ColabFold MMseqs2 API`_.
+
+    Parameters
+    ----------
+    sequences : str | list[str]
+        The sequences to align. Can be a single sequence (as a str) or a list of sequences.
+        If a list of sequences is provided, the function will return a list of MSA file paths.
+        If a single sequence is provided, the function will return a single MSA file path.
+
+    output_dir: str
+        The directory to save the output files. If `use_msa_cache` is `True` and MSAs are found
+        in the cache, they will be copied into this directory. If `None`, the function will return
+        the contents of the A3M files (as a list of strings) rather than saving them to disk and
+        returning file paths.
+
+    prefix : str, optional, default=tempfile.mkdtemp()
+        The prefix for temporary output files. Passed directly to ``run_mmseqs2``.
+
+    use_env : bool, optional, default=True
+        Whether to use environment-based filtering. Passed directly to ``run_mmseqs2``.
+
+    use_filter : bool, optional, default=True
+        Whether to use filtering. Passed directly to ``run_mmseqs2``.
+
+    use_pairing : bool, optional, default=False
+        Whether to use pairing. Passed directly to ``run_mmseqs2``.
+
+    pairing_strategy : str, optional, default="greedy"
+        The pairing strategy to use. Passed directly to ``run_mmseqs2``.
+
+    msa_server_url : str, optional, default="https://api.colabfold.com"
+        The URL of the MSA server. Passed to the ``host_url`` argument of ``run_mmseqs2``.
+
+    user_agent : str, optional, default="mabmaker/{__version__} briney@scripps.edu"
+        The user agent to use. Passed directly to ``run_mmseqs2``.
+
+    use_msa_cache : bool, optional, default=True
+        Whether to use the MSA cache.
+
+    msa_cache_dir : str, optional, default="~/.mabmaker/msa_cache"
+        The directory to save the MSA cache.
+
+    quiet : bool, optional, default=False
+        Whether to suppress progress bar. Passed directly to ``run_mmseqs2``.
+
+    Returns
+    -------
+    str | List[str]
+        A path to the MSA or a list of paths to the MSAs. If a single sequence is provided,
+        the function will return a single path. If a list of sequences is provided, the
+        function will return a list of paths.
+
+    .. _ColabFold MMseqs2 API: https://github.com/sokrypton/ColabFold
+    """
+
+    if isinstance(sequences, str):
+        sequences = [sequences]
+    if prefix is None:
+        prefix = tempfile.mkdtemp()
+
+    msa_paths = []
+    # placeholder to ensure msas are returned in input order
+    a3m_strings = [None] * len(sequences)
+    mmseqs2_sequences = []  # sequences that need to be run through MMseqs2
+    mmseqs2_slots = []  # indices of sequences needing MMseqs2
+
+    for i, seq in enumerate(sequences):
+        # check the cache
+        a3m_string = None
+        if use_msa_cache:
+            a3m_string = retrieve_msa_from_cache(seq, msa_cache_dir)
+        if a3m_string is not None:
+            a3m_strings[i] = a3m_string
+        else:
+            mmseqs2_sequences.append(seq)
+            mmseqs2_slots.append(i)
+
+    # run MMseqs2 on sequences that need it
+    if mmseqs2_sequences:
+        a3m_lines = run_mmseqs2(
+            x=mmseqs2_sequences,
+            prefix=prefix,
+            use_env=use_env,
+            use_filter=use_filter,
+            use_templates=False,
+            filter=filter,
+            use_pairing=use_pairing,
+            pairing_strategy=pairing_strategy,
+            host_url=msa_server_url,
+            user_agent=user_agent,
+            quiet=quiet,
+        )
+        for slot, a3m in zip(mmseqs2_slots, a3m_lines):
+            a3m_strings[slot] = a3m
+
+    for i, a3m_string in enumerate(a3m_strings):
+        if use_msa_cache and i in mmseqs2_slots:
+            # only cache sequences that aren't already in the cache
+            save_msa(a3m_string, msa_cache_dir)
+        # save MSA to the output directory, if provided
+        if output_dir is not None:
+            msa_path = save_msa(a3m_string, output_dir)
+            msa_paths.append(msa_path)
+        # otherwise, return MSA as a string
+        else:
+            msa_paths.append(a3m_string)
+
+    if len(msa_paths) == 1:
+        return msa_paths[0]
+    else:
+        return msa_paths
+
+
+# This is a modified version of the `run_mmseqs2` function from the `colabfold` package.
+# https://github.com/sokrypton/ColabFold/blob/main/colabfold/colabfold.py
 
 
 def run_mmseqs2(
@@ -35,7 +188,7 @@ def run_mmseqs2(
     use_pairing: bool = False,
     pairing_strategy: str = "greedy",
     host_url: str = "https://api.colabfold.com",
-    user_agent: str = "mabmaker/0.1.0 briney@scripps.edu",
+    user_agent: str = f"mabmaker/{__version__} briney@scripps.edu",
     quiet: bool = False,
 ) -> Tuple[List[str], List[str]]:
     """
@@ -49,37 +202,38 @@ def run_mmseqs2(
     prefix : str
         The prefix for the output files.
 
-    use_env : bool, optional
-        Whether to use environment-based filtering. Default is True.
+    use_env : bool, optional, default=True
+        Whether to use environment-based filtering.
 
-    use_filter : bool, optional
-        Whether to use filtering. Default is True.
+    use_filter : bool, optional, default=True
+        Whether to use filtering.
 
-    use_templates : bool, optional
-        Whether to use templates. Default is False.
+    use_templates : bool, optional, default=False
+        Whether to use templates.
 
-    filter : str, optional
-        The filter to use. Default is None.
+    filter : str, optional, default=None
+        The filter to use.
 
-    use_pairing : bool, optional
-        Whether to use pairing. Default is False.
+    use_pairing : bool, optional, default=False
+        Whether to use pairing.
 
-    pairing_strategy : str, optional
-        The pairing strategy to use. Default is "greedy".
+    pairing_strategy : str, optional, default="greedy"
+        The pairing strategy to use.
 
-    host_url : str, optional
-        The URL of the MMseqs2 API. Default is "https://api.colabfold.com".
+    host_url : str, optional, default="https://api.colabfold.com"
+        The URL of the MMseqs2 API.
 
-    user_agent : str, optional
-        The user agent to use. Default is an empty string.
+    user_agent : str, optional, default=""
+        The user agent to use.
 
-    quiet : bool, optional
-        Whether to suppress progress bar. Default is False.
+    quiet : bool, optional, default=False
+        Whether to suppress progress bar.
 
     Returns
     -------
-    Tuple[List[str], List[str]]
-
+    List[str] | Tuple[List[str], List[str]]
+        A list of paths to the A3M files. If ``use_pairing`` is ``True``, the function will return a tuple of two lists.
+        The first list contains the paths to the A3M files. The second list contains the template file paths.
 
     .. _MMseqs2: https://github.com/soedinglab/MMseqs2
     .. _ColabFold: https://github.com/sokrypton/ColabFold
@@ -113,14 +267,18 @@ def run_mmseqs2(
                     headers=headers,
                 )
             except requests.exceptions.Timeout:
-                logger.warning("Timeout while submitting to MSA server. Retrying...")
+                if not quiet:
+                    logger.warning(
+                        "Timeout while submitting to MSA server. Retrying..."
+                    )
                 continue
             except Exception as e:
                 error_count += 1
-                logger.warning(
-                    f"Error while fetching result from MSA server. Retrying... ({error_count}/5)"
-                )
-                logger.warning(f"Error: {e}")
+                if not quiet:
+                    logger.warning(
+                        f"Error while fetching result from MSA server. Retrying... ({error_count}/5)"
+                    )
+                    logger.warning(f"Error: {e}")
                 time.sleep(5)
                 if error_count > 5:
                     raise
@@ -130,7 +288,8 @@ def run_mmseqs2(
         try:
             out = res.json()
         except ValueError:
-            logger.error(f"Server didn't reply with json: {res.text}")
+            if not quiet:
+                logger.error(f"Server didn't reply with json: {res.text}")
             out = {"status": "ERROR"}
         return out
 
@@ -142,16 +301,18 @@ def run_mmseqs2(
                     f"{host_url}/ticket/{ID}", timeout=6.02, headers=headers
                 )
             except requests.exceptions.Timeout:
-                logger.warning(
-                    "Timeout while fetching status from MSA server. Retrying..."
-                )
+                if not quiet:
+                    logger.warning(
+                        "Timeout while fetching status from MSA server. Retrying..."
+                    )
                 continue
             except Exception as e:
                 error_count += 1
-                logger.warning(
-                    f"Error while fetching result from MSA server. Retrying... ({error_count}/5)"
-                )
-                logger.warning(f"Error: {e}")
+                if not quiet:
+                    logger.warning(
+                        f"Error while fetching result from MSA server. Retrying... ({error_count}/5)"
+                    )
+                    logger.warning(f"Error: {e}")
                 time.sleep(5)
                 if error_count > 5:
                     raise
@@ -160,7 +321,8 @@ def run_mmseqs2(
         try:
             out = res.json()
         except ValueError:
-            logger.error(f"Server didn't reply with json: {res.text}")
+            if not quiet:
+                logger.error(f"Server didn't reply with json: {res.text}")
             out = {"status": "ERROR"}
         return out
 
@@ -172,16 +334,18 @@ def run_mmseqs2(
                     f"{host_url}/result/download/{ID}", timeout=6.02, headers=headers
                 )
             except requests.exceptions.Timeout:
-                logger.warning(
-                    "Timeout while fetching result from MSA server. Retrying..."
-                )
+                if not quiet:
+                    logger.warning(
+                        "Timeout while fetching result from MSA server. Retrying..."
+                    )
                 continue
             except Exception as e:
                 error_count += 1
-                logger.warning(
-                    f"Error while fetching result from MSA server. Retrying... ({error_count}/5)"
-                )
-                logger.warning(f"Error: {e}")
+                if not quiet:
+                    logger.warning(
+                        f"Error while fetching result from MSA server. Retrying... ({error_count}/5)"
+                    )
+                    logger.warning(f"Error: {e}")
                 time.sleep(5)
                 if error_count > 5:
                     raise
@@ -241,7 +405,10 @@ def run_mmseqs2(
                 out = submit(seqs_unique, mode, N)
                 while out["status"] in ["UNKNOWN", "RATELIMIT"]:
                     sleep_time = 5 + random.randint(0, 5)
-                    logger.error(f"Sleeping for {sleep_time}s. Reason: {out['status']}")
+                    if not quiet:
+                        logger.error(
+                            f"Sleeping for {sleep_time}s. Reason: {out['status']}"
+                        )
                     # resubmit
                     time.sleep(sleep_time)
                     out = submit(seqs_unique, mode, N)
@@ -261,7 +428,8 @@ def run_mmseqs2(
                 pbar.set_description(out["status"])
                 while out["status"] in ["UNKNOWN", "RUNNING", "PENDING"]:
                     t = 5 + random.randint(0, 5)
-                    logger.error(f"Sleeping for {t}s. Reason: {out['status']}")
+                    if not quiet:
+                        logger.error(f"Sleeping for {t}s. Reason: {out['status']}")
                     time.sleep(t)
                     out = status(ID)
                     pbar.set_description(out["status"])
@@ -333,16 +501,18 @@ def run_mmseqs2(
                             headers=headers,
                         )
                     except requests.exceptions.Timeout:
-                        logger.warning(
-                            "Timeout while submitting to template server. Retrying..."
-                        )
+                        if not quiet:
+                            logger.warning(
+                                "Timeout while submitting to template server. Retrying..."
+                            )
                         continue
                     except Exception as e:
                         error_count += 1
-                        logger.warning(
-                            f"Error while fetching result from template server. Retrying... ({error_count}/5)"
-                        )
-                        logger.warning(f"Error: {e}")
+                        if not quiet:
+                            logger.warning(
+                                f"Error while fetching result from template server. Retrying... ({error_count}/5)"
+                            )
+                            logger.warning(f"Error: {e}")
                         time.sleep(5)
                         if error_count > 5:
                             raise
@@ -386,3 +556,587 @@ def run_mmseqs2(
         template_paths = template_paths_
 
     return (a3m_lines, template_paths) if use_templates else a3m_lines
+
+
+# -----------------------------
+#     hashing and caching
+# -----------------------------
+
+
+def hash_sequence(seq: str) -> str:
+    """
+    Hash a sequence (uppercased) using SHA-256.
+
+    Parameters
+    ----------
+    seq : str
+        The sequence to hash.
+
+    Returns
+    -------
+    str
+        The SHA-256 hash of the sequence.
+
+    """
+    hash_object = hashlib.sha256(seq.upper().encode())
+    return hash_object.hexdigest()
+
+
+def retrieve_msa_from_cache(
+    seq: str,
+    msa_cache_dir: str = "~/.mabmaker/msa_cache",
+) -> str | None:
+    """
+    Check the MSA cache for a sequence.
+
+    Parameters
+    ----------
+    seq : str
+        The sequence to hash.
+
+    msa_cache_dir : str, optional
+        The path to the MSA cache directory. Default is "~/.mabmaker/msa_cache".
+
+    Returns
+    -------
+    str | None
+        The path to the MSA if it exists, otherwise None.
+
+    """
+    # hash the sequence
+    seq_hash = hash_sequence(seq)
+
+    # check the MSA cache
+    cache_path = os.path.join(msa_cache_dir, f"{seq_hash}.a3m")
+    if os.path.exists(cache_path):
+        with open(cache_path, "r") as f:
+            return f.read()
+
+    return None
+
+
+def save_msa(
+    msa: str,
+    destination_dir: str,
+) -> str:
+    """
+    Save an MSA. The MSA file will be named after the SHA256 hash of the query sequence
+    and deposited into the destination directory.
+
+    Parameters
+    ----------
+    msa : str
+        The MSA to save, in .a3m format. The name of the MSA file will be the SHA256 hash
+        of the query sequence (the first sequence in the MSA).
+
+    destination_dir : str
+        The path to the directory to save the MSA.
+
+    Returns
+    -------
+    str
+        The path to the saved MSA.
+
+    """
+    # get the query sequence from the MSA
+    seq = msa.split("\n")[1]
+
+    # hash the sequence
+    seq_hash = hash_sequence(seq)
+
+    # save the MSA
+    os.makedirs(destination_dir, exist_ok=True)
+    msa_path = os.path.join(destination_dir, f"{seq_hash}.a3m")
+    with open(msa_path, "w") as f:
+        f.write(msa)
+
+    return msa_path
+
+
+# -----------------------------
+#        Boltz-1 MSAs
+# -----------------------------
+
+
+def precompute_boltz_msas(
+    runs: list[StructurePredictionRun],
+    base_output_path: str,
+    msa_server_url: str = "https://api.colabfold.com",
+    use_msa_cache: bool = True,
+    msa_cache_dir: str = "~/.mabmaker/msa_cache",
+) -> list[StructurePredictionRun]:
+    """
+    Precompute MSAs for Boltz-1 runs.
+
+    Parameters
+    ----------
+    runs : list[StructurePredictionRun]
+        The runs to precompute MSAs for. MSAs will be computed for each protein chain in
+        each run.
+
+    output_path : str
+        The path to the output directory. MSAs will be saved into a subdirectory called
+        ``msas/precomputed``.
+
+    use_msa_cache : bool, optional, default=True
+        Whether to use the MSA cache. If ``True``, the cache will be checked for existing
+        MSAs before running ``mmseqs2``. If a sequence is not present in the cache, the
+        resulting MSA will be saved to the cache. If ``False``, ``mmseqs2`` will be run
+        for each sequence and the resulting MSAs will not be cached.
+
+    msa_cache_dir : str, optional, default="~/.mabmaker/msa_cache"
+        The path to the MSA cache directory.
+
+    Returns
+    -------
+    list[StructurePredictionRun]
+        The run objects with precomputed MSA file paths added to the ``msa`` attribute
+        of each protein chain.
+
+    """
+    for run in tqdm(
+        runs,
+        desc="precomputing MSAs: ",
+        bar_format="{desc}{percentage:3.0f}%|{bar:25}{r_bar}",
+    ):
+        # make the run's precomputed MSA directory
+        msa_dir = os.path.join(base_output_path, run.name, "msas", "precomputed")
+        a3m_dir = os.path.abspath(os.path.join(msa_dir, "a3m"))
+        mmseqs_dir = os.path.abspath(os.path.join(msa_dir, "mmseqs"))
+        os.makedirs(a3m_dir, exist_ok=True)
+        # get MSAs
+        sequences = [chain.sequence for chain in run.protein_chains]
+        msa_paths = msa(
+            sequences=sequences,
+            output_dir=a3m_dir,
+            prefix=mmseqs_dir,
+            msa_server_url=msa_server_url,
+            use_msa_cache=use_msa_cache,
+            msa_cache_dir=msa_cache_dir,
+        )
+        if isinstance(msa_paths, str):
+            msa_paths = [msa_paths]
+        # add MSA paths to the run's protein chains
+        for chain, msa_path in zip(run.protein_chains, msa_paths):
+            chain.msa = msa_path
+
+    return runs
+
+
+# -----------------------------
+#        Protenix MSAs
+# -----------------------------
+
+
+def precompute_protenix_msas(
+    runs: list[StructurePredictionRun],
+    base_output_path: str,
+    msa_server_url: str = "https://api.colabfold.com",
+    use_msa_cache: bool = True,
+    msa_cache_dir: str = "~/.mabmaker/msa_cache",
+) -> list[StructurePredictionRun]:
+    """
+    Precompute MSAs for Protenix runs.
+
+    Parameters
+    ----------
+    runs : list[StructurePredictionRun]
+        The runs to precompute MSAs for. MSAs will be computed for each protein chain in
+        each run.
+
+    output_path : str
+        The path to the output directory. MSAs will be saved into a subdirectory called
+        ``msas/precomputed``.
+
+    use_msa_cache : bool, optional, default=True
+        Whether to use the MSA cache. If ``True``, the cache will be checked for existing
+        MSAs before running ``mmseqs2``. If a sequence is not present in the cache, the
+        resulting MSA will be saved to the cache. If ``False``, ``mmseqs2`` will be run
+        for each sequence and the resulting MSAs will not be cached.
+
+    msa_cache_dir : str, optional, default="~/.mabmaker/msa_cache"
+        The path to the MSA cache directory.
+
+    Returns
+    -------
+    list[StructurePredictionRun]
+        The run objects with precomputed MSA file paths added to the ``msa`` attribute
+        of each protein chain.
+
+    """
+    for run in tqdm(
+        runs,
+        desc="precomputing MSAs: ",
+        bar_format="{desc}{percentage:3.0f}%|{bar:25}{r_bar}",
+    ):
+        # make the run's precomputed MSA directory
+        msa_dir = os.path.join(base_output_path, run.name, "msas", "precomputed")
+        a3m_dir = os.path.abspath(os.path.join(msa_dir, "a3m"))
+        mmseqs_dir = os.path.abspath(os.path.join(msa_dir, "mmseqs"))
+        os.makedirs(a3m_dir, exist_ok=True)
+
+        # get MSAs
+        sequences = [chain.sequence for chain in run.protein_chains]
+        msa_strings = msa(
+            sequences=sequences,
+            output_dir=None,
+            prefix=mmseqs_dir,
+            msa_server_url=msa_server_url,
+            use_msa_cache=use_msa_cache,
+            msa_cache_dir=msa_cache_dir,
+        )
+        if isinstance(msa_strings, str):
+            msa_strings = [msa_strings]
+
+        # add MSA paths to the run's protein chains
+        for i, (chain, msa_string) in enumerate(zip(run.protein_chains, msa_strings)):
+            msa_path = os.path.join(a3m_dir, str(i))  # base A3M dir plus chain index
+            os.makedirs(msa_path, exist_ok=True)
+
+            # make the non-pairing MSA
+            non_pairing = ">query\n" + "\n".join(msa_string.split("\n")[1:])
+            with open(os.path.join(msa_path, "non_pairing.a3m"), "w") as f:
+                f.write(non_pairing)
+
+            # make the pairing MSA
+            query_seq = msa_string.split("\n")[1]
+            pairing = f">query\n{query_seq}"
+            with open(os.path.join(msa_path, "pairing.a3m"), "w") as f:
+                f.write(pairing)
+
+            chain.msa = msa_path
+
+            # # non-pairing MSA
+            # nonpairing_path = os.path.join(msa_subdir, "non_pairing.a3m")
+            # with open(nonpairing_path, "w") as f:
+            #     f.write(msa_path)
+            # # pairing MSA (which we don't use)
+            # pairing_path = os.path.join(msa_subdir, "pairing.a3m")
+            # with open(pairing_path, "w") as f:
+            #     f.write("")  # empty file
+            # # add the MSA path to the chain
+            # chain.msa = msa_path
+
+    return runs
+
+
+# the following class is adapted from:
+# https://github.com/bytedance/Protenix/blob/main/scripts/colabfold_msa.py
+
+
+class A3MProcessor:
+    """Processor for A3M file format."""
+
+    def __init__(self, a3m_file: str, out_dir: str):
+        self.out_dir = out_dir
+        self.a3m_file = Path(a3m_file)
+        self.a3m_content = self._read_a3m_file()
+        self.chain_info = self._parse_header()
+
+    def _read_a3m_file(self) -> str:
+        """Read A3M file content."""
+        return self.a3m_file.read_text()
+
+    def _parse_header(self) -> Tuple[List[str], Dict[str, Tuple[int, int]]]:
+        """Parse A3M header to get chain information."""
+        first_line = self.a3m_content.split("\n")[0]
+        if first_line[0] == "#":
+            lengths, oligomeric_state = first_line.split("\t")
+
+            chain_lengths = [int(x) for x in lengths[1:].split(",")]
+            chain_names = [f"10{x+1}" for x in range(len(oligomeric_state.split(",")))]
+
+            # Calculate sequence ranges for each chain
+            seq_ranges = {}
+            for i, name in enumerate(chain_names):
+                start = sum(chain_lengths[:i])
+                end = sum(chain_lengths[: i + 1])
+                seq_ranges[name] = (start, end)
+
+            return chain_names, seq_ranges
+        else:
+            non_pairing = ">query\n" + "\n".join(self.a3m_content.split("\n")[1:])
+            query_seq = self.a3m_content.split("\n")[1]
+            pairing = f">query\n{query_seq}"
+            msa_path = Path(self.out_dir) / "msa"
+            msa_path.mkdir(exist_ok=True)
+            msa_path = msa_path / "0"
+            msa_path.mkdir(exist_ok=True)
+            with open(msa_path / "non_pairing.a3m", "w") as f:
+                f.write(non_pairing)
+
+            with open(msa_path / "pairing.a3m", "w") as f:
+                f.write(pairing)
+
+            return [None]
+
+    def _extract_sequence(self, line: str, range_tuple: Tuple[int, int]) -> str:
+        """Extract sequence for specific range."""
+        seq = []
+        no_insert_count = 0
+        start, end = range_tuple
+
+        for char in line:
+            if char.isupper() or char == "-":
+                no_insert_count += 1
+            # we keep insertions
+            if start < no_insert_count <= end:
+                seq.append(char)
+            elif no_insert_count > end:
+                break
+
+        return "".join(seq)
+
+    def split_sequences(self) -> None:
+        """Split A3M file into pairing and non-pairing sequences."""
+        out_dir = Path(self.out_dir) / "msa"
+        chain_names, seq_ranges = self.chain_info
+
+        pairing_a3ms = {name: [] for name in chain_names}
+        nonpairing_a3ms = {name: [] for name in chain_names}
+
+        current_query = None
+        for line in self.a3m_content.split("\n"):
+            if line.startswith("#"):
+                continue
+
+            if line.startswith(">"):
+                name = line[1:]
+                if name in chain_names:
+                    current_query = chain_names[chain_names.index(name)]
+                elif name == "\t".join(chain_names):
+                    current_query = None
+
+                # Add header line to appropriate dictionary
+                if current_query:
+                    nonpairing_a3ms[current_query].append(line)
+                else:
+                    for name in chain_names:
+                        pairing_a3ms[name].append(line)
+                continue
+
+            # Process sequence line
+            if not line:
+                continue
+
+            if current_query:
+                seq = self._extract_sequence(line, seq_ranges[current_query])
+                nonpairing_a3ms[current_query].append(seq)
+            else:
+                for name in chain_names:
+                    seq = self._extract_sequence(line, seq_ranges[name])
+                    pairing_a3ms[name].append(seq)
+
+        self._write_output_files(out_dir, nonpairing_a3ms, pairing_a3ms)
+
+    def _write_output_files(
+        self,
+        out_dir: Path,
+        nonpairing_a3ms: Dict[str, List[str]],
+        pairing_a3ms: Dict[str, List[str]],
+    ) -> None:
+        """Write split sequences to output files."""
+        out_dir.mkdir(exist_ok=True)
+
+        # Write non-pairing sequences
+        for i, (name, lines) in enumerate(nonpairing_a3ms.items()):
+            chain_dir = out_dir / str(i)
+            chain_dir.mkdir(exist_ok=True)
+
+            with open(chain_dir / "non_pairing.a3m", "w") as f:
+                query_seq = lines[1]
+                f.write(">query\n")
+                f.write(f"{query_seq}\n")
+                f.write("\n".join(lines[2:]))
+
+        # Write pairing sequences
+        for i, (name, lines) in enumerate(pairing_a3ms.items()):
+            chain_dir = out_dir / str(i)
+            chain_dir.mkdir(exist_ok=True)
+
+            with open(chain_dir / "pairing.a3m", "w") as f:
+                query_seq = lines[1]
+                f.write(">query\n")
+                f.write(f"{query_seq}\n")
+
+                # Process remaining sequences
+                sequences = {}
+                for j, line in enumerate(lines[2:]):
+                    if line.startswith(">"):
+                        current_name = f"UniRef100_{line[1:].split()[i]}_{j}"
+                        sequences[current_name] = ""
+                    elif line and "DUMMY" not in current_name:
+                        sequences[current_name] = line
+
+                # Write processed sequences
+                for seq_name, seq in sequences.items():
+                    if seq:  # Only write non-empty sequences
+                        f.write(f">{seq_name}\n{seq}\n")
+
+
+# -----------------------------
+#        Chai-1 MSAs
+# -----------------------------
+
+
+def precompute_chai_msas(
+    runs: list[StructurePredictionRun],
+    base_output_path: str,
+    msa_server_url: str = "https://api.colabfold.com",
+    use_msa_cache: bool = True,
+    msa_cache_dir: str = "~/.mabmaker/msa_cache",
+) -> list[StructurePredictionRun]:
+    """
+    Precompute MSAs for Chai-1 runs.
+
+    Parameters
+    ----------
+    runs : list[StructurePredictionRun]
+        The runs to precompute MSAs for. MSAs will be computed for each protein chain in
+        each run.
+
+    output_path : str
+        The path to the output directory. MSAs will be saved into a subdirectory called
+        ``msas/precomputed``. A3M files will be saved into a subdirectory called
+        ``a3m``, and aligned parquet files will be saved into a subdirectory called
+        ``parquet``.
+
+    use_msa_cache : bool, optional, default=True
+        Whether to use the MSA cache. If ``True``, the cache will be checked for existing
+        MSAs before running ``mmseqs2``. If a sequence is not present in the cache, the
+        resulting MSA will be saved to the cache. If ``False``, ``mmseqs2`` will be run
+        for each sequence and the resulting MSAs will not be cached.
+
+    msa_cache_dir : str, optional, default="~/.mabmaker/msa_cache"
+        The path to the MSA cache directory.
+
+    Returns
+    -------
+    list[StructurePredictionRun]
+        The run objects with precomputed MSA file paths added to the ``msa`` attribute
+        of each protein chain.
+
+    """
+    for run in tqdm(
+        runs,
+        desc="precomputing MSAs: ",
+        bar_format="{desc}{percentage:3.0f}%|{bar:25}{r_bar}",
+    ):
+        # make the run's precomputed MSA directories
+        msa_dir = os.path.join(base_output_path, run.name, "msas", "precomputed")
+        a3m_dir = os.path.abspath(os.path.join(msa_dir, "a3m"))
+        pqt_dir = os.path.abspath(os.path.join(msa_dir, "pqt"))
+        mmseqs_dir = os.path.abspath(os.path.join(msa_dir, "mmseqs"))
+        os.makedirs(a3m_dir, exist_ok=True)
+        os.makedirs(pqt_dir, exist_ok=True)
+        # get MSAs and convert to Chai's aligned parquet format
+        sequences = [chain.sequence for chain in run.protein_chains]
+        msa_paths = msa(
+            sequences=sequences,
+            output_dir=a3m_dir,
+            prefix=mmseqs_dir,
+            msa_server_url=msa_server_url,
+            use_msa_cache=use_msa_cache,
+            msa_cache_dir=msa_cache_dir,
+        )
+        if isinstance(msa_paths, str):
+            msa_paths = [msa_paths]
+        # process the MSAs
+        process_a3ms_for_chai(msa_paths, pqt_dir)
+        run.msa_directory = pqt_dir
+
+    return runs
+
+
+# the following functions are adapted from:
+# https://github.com/chaidiscovery/chai-lab/blob/main/chai_lab/data/parsing/msas/aligned_pqt.py
+
+
+@typecheck
+def merge_multi_a3m_to_aligned_dataframe(
+    msa_a3m_files: Mapping[Path, MSADataSource],
+    insert_keys_for_sources: Literal["all", "none", "uniprot"] = "uniprot",
+) -> pd.DataFrame:
+    """Merge multiple a3ms from the same query sequence into a single aligned parquet."""
+    dfs = {
+        src: a3m_to_aligned_dataframe(
+            a3m_path,
+            src,
+            insert_pairing_key=(
+                src in (MSADataSource.UNIPROT, MSADataSource.UNIPROT_N3)
+                if insert_keys_for_sources == "uniprot"
+                else (insert_keys_for_sources == "all")
+            ),
+        )
+        for a3m_path, src in msa_a3m_files.items()
+    }
+    # Check that all the dfs share the same query sequence
+    queries = {df.iloc[0]["sequence"] for df in dfs.values()}
+    assert len(queries) == 1
+    # As a base, set the query sequence
+    chunks = [next(iter(dfs.values())).iloc[0:1]]
+    for df in dfs.values():
+        # Take the non-query sequences for all sources
+        chunks.append(df.iloc[1:])
+    return pd.concat(chunks, ignore_index=True).reset_index(drop=True)
+
+
+def process_a3ms_for_chai(
+    a3m_files: str | Path | list[str | Path], output_directory: str | Path = None
+) -> None:
+    """
+    Converts one or more a3m-formatted alignment files into a single aligned.pqt file.
+    If multiple files are provided, they are expected to be derived from the same query sequence.
+
+    Parameters
+    ----------
+    a3m_files : str | Path | list[str | Path]
+        Path to a3m files. Can be any of the following:
+        - A directory containing a3m files
+        - A single a3m file path
+        - A list of a3m file paths
+
+    output_directory : str | Path
+        The path to the output directory.
+
+    Returns
+    -------
+    None
+
+    """
+    # process input
+    if isinstance(a3m_files, (str, Path)):
+        if os.path.isdir(a3m_files):
+            a3m_dir = Path(a3m_files)
+            a3m_files = list(a3m_dir.glob("*.a3m"))
+            if not a3m_files:
+                raise ValueError(f"No a3m files found in {a3m_files}")
+        elif os.path.isfile(a3m_files):
+            a3m_files = [Path(a3m_files)]
+        else:
+            raise ValueError(f"Invalid a3m path: {a3m_files}")
+    else:
+        a3m_files = [Path(a3m_file) for a3m_file in a3m_files]
+
+    # map a3m files to their source database
+    mapped_a3m_files = {}
+    for a3m_file in a3m_files:
+        dbname = a3m_file.stem.replace("_hits", "").replace("hits_", "")
+        try:
+            msa_src = MSADataSource(dbname)
+        except ValueError:
+            msa_src = MSADataSource.UNIREF90
+        mapped_a3m_files[a3m_file] = msa_src
+
+    # merge a3m files into a dataframe
+    df = merge_multi_a3m_to_aligned_dataframe(
+        mapped_a3m_files, insert_keys_for_sources="uniprot"
+    )
+
+    # get the query sequence and use it to determine where we save the file.
+    query_seq: str = df.iloc[0]["sequence"]
+
+    # output
+    outdir = Path(output_directory)
+    outdir.mkdir(exist_ok=True, parents=True)
+    df.to_parquet(outdir / expected_basename(query_seq))

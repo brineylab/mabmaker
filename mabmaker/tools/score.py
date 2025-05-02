@@ -22,6 +22,8 @@ __all__ = [
     "mean_fnat",
     "iRMSD",
     "mean_iRMSD",
+    "chain_COM_distance",
+    "mean_COM_distance",
 ]
 
 
@@ -949,7 +951,264 @@ def mean_iRMSD(
     # save iRMSD values to CSV if log directory is provided
     if log_dir is not None and irmsd_data:
         df = pd.DataFrame(irmsd_data)
-        csv_path = os.path.join(log_dir, "irmsd_values.csv")
+        csv_path = os.path.join(log_dir, "irmsd.csv")
         df.to_csv(csv_path, index=False)
 
     return mean_irmsd_val
+
+
+# -----------------------------------------
+#             ssCOM distance
+# -----------------------------------------
+
+
+def chain_COM_distance(
+    filepath_1: str | Path,
+    filepath_2: str | Path,
+    antibody_chains: str | list[str] = ["A", "B"],
+    antigen_chains: str | list[str] | None = None,
+    atom_types: str | list[str] = ["CA"],
+    quiet: bool = True,
+) -> dict[str, float]:
+    """
+    Calculate the distance between centers of mass of antibody chains after
+    aligning the structures by the antigen chain.
+
+    Parameters
+    ----------
+    filepath_1 : str or Path
+        The path to the first PDB/CIF file.
+
+    filepath_2 : str or Path
+        The path to the second PDB/CIF file.
+
+    antibody_chains : str or list[str], optional, default=["A", "B"]
+        The chain ID(s) to consider as antibody. Can be a single chain or multiple chains.
+
+    antigen_chains : str or list[str] or None, optional, default=None
+        The chain ID(s) to consider as antigen. If not provided, the function will
+        use find_antibody_bound_antigen_chain to identify the appropriate chain.
+
+    atom_types : str or list[str], optional, default=["CA"]
+        The atom type(s) to use for calculations. Default is CA atoms only.
+
+    quiet : bool, optional, default=True
+        Suppress verbose output from the PDB parser.
+
+    Returns
+    -------
+    dict[str, float]
+        Dictionary mapping each antibody chain to the distance (in Ångstroms) between
+        the centers of mass of that chain in the two structures.
+    """
+    # Convert paths and parameters to appropriate types
+    if isinstance(filepath_1, str):
+        filepath_1 = Path(filepath_1)
+    if isinstance(filepath_2, str):
+        filepath_2 = Path(filepath_2)
+
+    if isinstance(antibody_chains, str):
+        antibody_chains = [antibody_chains]
+    if isinstance(antigen_chains, str) and antigen_chains is not None:
+        antigen_chains = [antigen_chains]
+    if isinstance(atom_types, str):
+        atom_types = [atom_types]
+
+    # Get structures
+    struct1 = _get_structure(filepath_1, quiet=quiet)
+    struct2 = _get_structure(filepath_2, quiet=quiet)
+
+    # Determine antigen chains if not provided
+    if antigen_chains is None:
+        antigen_chain1, _, _ = find_antibody_bound_antigen_chain(
+            filepath_1, antibody_chains=antibody_chains
+        )
+        antigen_chain2, _, _ = find_antibody_bound_antigen_chain(
+            filepath_2, antibody_chains=antibody_chains
+        )
+        # Use only the antigen chain from the first structure for alignment
+        antigen_chains = [antigen_chain1]
+
+    # Extract atoms from antigen chains for alignment
+    antigen_atoms1 = []
+    antigen_atoms2 = []
+
+    for chain_id in antigen_chains:
+        if chain_id in struct1.child_dict and chain_id in struct2.child_dict:
+            chain1 = struct1[chain_id]
+            chain2 = struct2[chain_id]
+
+            chain1_atoms = [
+                atom
+                for atom in chain1.get_atoms()
+                if atom.name in atom_types and atom.parent.id[0] == " "
+            ]
+            chain2_atoms = [
+                atom
+                for atom in chain2.get_atoms()
+                if atom.name in atom_types and atom.parent.id[0] == " "
+            ]
+
+            # Only add atoms if they match in number
+            if len(chain1_atoms) == len(chain2_atoms):
+                antigen_atoms1.extend(chain1_atoms)
+                antigen_atoms2.extend(chain2_atoms)
+
+    # Ensure we have atoms to align
+    if not antigen_atoms1 or not antigen_atoms2:
+        raise ValueError(
+            f"No matching antigen atoms found in specified chains: {antigen_chains}"
+        )
+
+    # Superimpose structures based on antigen atoms
+    sup = Superimposer()
+    sup.set_atoms(antigen_atoms1, antigen_atoms2)
+
+    # Apply rotation/translation to the entire second structure
+    sup.apply(struct2.get_atoms())
+
+    # Calculate center of mass for each antibody chain in both structures
+    results = {}
+    for chain_id in antibody_chains:
+        if chain_id in struct1.child_dict and chain_id in struct2.child_dict:
+            # Get atoms for COM calculation
+            chain1_atoms = [
+                atom
+                for atom in struct1[chain_id].get_atoms()
+                if atom.name in atom_types and atom.parent.id[0] == " "
+            ]
+            chain2_atoms = [
+                atom
+                for atom in struct2[chain_id].get_atoms()
+                if atom.name in atom_types and atom.parent.id[0] == " "
+            ]
+
+            # Calculate center of mass for each chain
+            if chain1_atoms and chain2_atoms:
+                com1 = np.mean([atom.coord for atom in chain1_atoms], axis=0)
+                com2 = np.mean([atom.coord for atom in chain2_atoms], axis=0)
+
+                # Calculate Euclidean distance between centers of mass
+                distance = np.sqrt(np.sum((com1 - com2) ** 2))
+                results[chain_id] = distance
+
+    return results
+
+
+def mean_COM_distance(
+    files: list[str] | str,
+    antibody_chains: str | list[str] = ["A", "B"],
+    antigen_chains: str | list[str] | None = None,
+    atom_types: str | list[str] = ["CA"],
+    quiet: bool = True,
+    log_dir: str | Path | None = None,
+) -> dict[str, float]:
+    """
+    Calculate the sum of squared center of mass distances between antibody chains
+    for all pairwise combinations of PDB/CIF files.
+
+    Parameters
+    ----------
+    files : list[str] or str
+        Either a list of PDB/CIF file paths or a directory path containing PDB/CIF files.
+
+    antibody_chains : str or list[str], optional, default=["A", "B"]
+        The chain ID(s) to consider as antibody. Can be a single chain or multiple chains.
+
+    antigen_chains : str or list[str] or None, optional, default=None
+        The chain ID(s) to consider as antigen. If not provided, the function will
+        use find_antibody_bound_antigen_chain to identify the appropriate chain.
+
+    atom_types : str or list[str], optional, default=["CA"]
+        The atom type(s) to use for calculations. Default is CA atoms only.
+
+    quiet : bool, optional, default=True
+        Suppress verbose output from the PDB parser.
+
+    log_dir : str or Path or None, optional, default=None
+        Directory path to save CSV log file with individual COM distance values.
+        If not provided, no log file will be generated.
+
+    Returns
+    -------
+    dict[str, float]
+        Dictionary mapping each antibody chain to the sum of squared distances (in Ångstroms)
+        between the centers of mass of that chain across all file pairs.
+    """
+    # Convert antibody_chains to list if it's a string
+    if isinstance(antibody_chains, str):
+        antibody_chains = [antibody_chains]
+
+    # Handle input files (directory or list of files)
+    if isinstance(files, str):
+        dir_path = Path(files)
+        if not dir_path.exists():
+            raise FileNotFoundError(f"Directory does not exist: {dir_path}")
+        if not dir_path.is_dir():
+            raise ValueError(f"Path is not a directory: {dir_path}")
+
+        # Get all PDB and CIF files in the directory
+        pdb_files = list(dir_path.glob("*.pdb")) + list(dir_path.glob("*.ent"))
+        cif_files = list(dir_path.glob("*.cif")) + list(dir_path.glob("*.mmcif"))
+        files = pdb_files + cif_files
+    else:
+        # Convert string paths to Path objects
+        files = [Path(f) if isinstance(f, str) else f for f in files]
+
+        # Verify all files exist
+        for file_path in files:
+            if not file_path.exists():
+                raise FileNotFoundError(f"File does not exist: {file_path}")
+
+    # Need at least 2 files for pairwise comparisons
+    if len(files) < 2:
+        raise ValueError(
+            "At least two PDB/CIF files are required for COM distance calculation"
+        )
+
+    # Create log directory if provided and it doesn't exist
+    if log_dir is not None:
+        log_dir = Path(log_dir)
+        log_dir.mkdir(parents=True, exist_ok=True)
+
+    # Convert antigen_chains to list if it's a string
+    if isinstance(antigen_chains, str) and antigen_chains is not None:
+        antigen_chains = [antigen_chains]
+
+    # Initialize results dictionary and data collection for logging
+    ss_distances = {chain: 0.0 for chain in antibody_chains}
+    com_data = []
+
+    # Calculate COM distances for all combinations of file pairs
+    for file1, file2 in itertools.combinations(files, 2):
+        try:
+            distances = chain_COM_distance(
+                file1,
+                file2,
+                antibody_chains,
+                antigen_chains,
+                atom_types,
+                quiet,
+            )
+
+            # Add distances to sum of squares for each chain
+            for chain, distance in distances.items():
+                ss_distances[chain] += distance**2
+
+            # Store data for logging
+            data_entry = {"filepath_1": file1, "filepath_2": file2}
+            for chain, distance in distances.items():
+                data_entry[f"chain_{chain}_distance"] = distance
+            com_data.append(data_entry)
+
+        except Exception as e:
+            print(f"Error calculating COM distance for {file1} and {file2}: {e}")
+            continue
+
+    # Save COM distance values to CSV if log directory is provided
+    if log_dir is not None and com_data:
+        df = pd.DataFrame(com_data)
+        csv_path = os.path.join(log_dir, "com_distance.csv")
+        df.to_csv(csv_path, index=False)
+
+    return ss_distances

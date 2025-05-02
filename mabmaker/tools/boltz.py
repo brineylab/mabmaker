@@ -5,14 +5,18 @@
 
 import concurrent.futures as cf
 import os
+import shutil
+import warnings
 from typing import Iterable
 
-import abutils
 from tqdm.auto import tqdm
 
 from ..utils.inputs import StructurePredictionRun, setup_structure_prediction_run
 from ..utils.jobs import get_gpu_queue, gpu_worker
 from ..utils.outputs import process_boltz_output
+from .msa import precompute_boltz_msas
+
+warnings.filterwarnings("ignore", category=DeprecationWarning)
 
 __all__ = ["boltz"]
 
@@ -23,6 +27,8 @@ def boltz(
     gpus: int | Iterable[int] | None = None,
     use_msa_server: bool = True,
     msa_server_url: str = "https://api.colabfold.com",
+    use_msa_cache: bool = True,
+    msa_cache_dir: str = "~/.mabmaker/msa_cache",
     recycling_steps: int = 3,
     sampling_steps: int = 200,
     diffusion_samples: int = 5,
@@ -33,6 +39,7 @@ def boltz(
     write_full_pae: bool = True,
     write_full_pde: bool = True,
     cache: str = "~/.boltz",
+    compress_output: bool = False,
 ) -> None:
     """
     Structure prediction with `Boltz-1`_.
@@ -60,6 +67,15 @@ def boltz(
 
     msa_server_url : str, optional, default="https://api.colabfold.com"
         The URL of the MSA server.
+
+    use_msa_cache : bool, optional, default=True
+        Whether to use the MSA cache. If ``True``, the cache will be checked for existing
+        MSAs before running ``mmseqs2``. If a sequence is not present in the cache, the
+        resulting MSA will be saved to the cache. If ``False``, ``mmseqs2`` will be run
+        for each sequence and the resulting MSAs will not be cached.
+
+    msa_cache_dir : str, optional, default="~/.mabmaker/msa_cache"
+        The path to the MSA cache directory.
 
     recycling_steps : int, optional, default=3
         The number of recycling steps.
@@ -94,12 +110,25 @@ def boltz(
     cache : str, optional, default="~/.boltz"
         The path to the cache directory, which contains model weights and other resources.
 
+    compress_output : bool, optional, default=False
+        Whether to compress the output directory. If `True`, the output directory will
+        be compressed into a gzipped tarball with the extension ``.tar.gz`` and located
+        in the output directory.
+
     .. _Boltz-1: https://github.com/jwohlwend/boltz
     .. _AlphaFold3 input JSON file: https://github.com/google-deepmind/alphafold/tree/main/server
 
     """
     # setup runs
     runs = setup_structure_prediction_run(json_path, output_path)
+
+    # MSAs
+    runs = precompute_boltz_msas(
+        runs=runs,
+        base_output_path=output_path,
+        use_msa_cache=use_msa_cache,
+        msa_cache_dir=msa_cache_dir,
+    )
 
     # get GPU queue
     gpu_queue = get_gpu_queue(gpus)
@@ -137,7 +166,7 @@ def boltz(
         # monitor progress
         with tqdm(
             total=len(futures),
-            desc="Boltz-1",
+            desc="Boltz-1: ",
             bar_format="{desc}{percentage:3.0f}%|{bar:25}{r_bar}",
         ) as pbar:
             for _ in cf.as_completed(futures):
@@ -160,6 +189,14 @@ def boltz(
                 stderr=stderr,
             )
             run_idx += 1
+
+        # compress output
+        if compress_output:
+            shutil.make_archive(
+                base_name=os.path.join(output_path, run.name),
+                format="gztar",
+                root_dir=os.path.join(output_path, run.name),
+            )
 
 
 def _build_boltz_command(
