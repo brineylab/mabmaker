@@ -3,6 +3,7 @@ click
 magika
 natsort
 numpy
+polars
 prody
 pyyaml
 requests
