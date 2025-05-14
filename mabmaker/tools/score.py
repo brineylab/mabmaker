@@ -24,6 +24,8 @@ __all__ = [
     "mean_iRMSD",
     "chain_COM_distance",
     "mean_COM_distance",
+    "approach_angle",
+    "approach_angle_variance",
 ]
 
 
@@ -56,7 +58,39 @@ def _get_structure(file_path, quiet: bool = True):
     return parser.get_structure(file_path.stem, file_path)[0]  # model 0
 
 
-def atoms_of(chain, heavy_only: bool = True) -> list:
+def _get_pdb_and_cif_files(files: str | Path | list[str | Path]) -> list[Path]:
+    """
+    Get all PDB and CIF files in the directory.
+
+    Parameters
+    ----------
+    files : str | Path | list[str | Path]
+        The path to the directory containing the PDB/CIF files or a list of file paths.
+
+    Returns
+    -------
+    list[Path]
+        A list of PDB and CIF files.
+    """
+    if isinstance(files, str):  # directory
+        dir_path = Path(files)
+        if not dir_path.exists():
+            raise FileNotFoundError(f"Directory does not exist: {dir_path}")
+        if not dir_path.is_dir():
+            raise ValueError(f"Path is not a directory: {dir_path}")
+        # get all PDB and CIF files in the directory
+        pdb_files = list(dir_path.glob("*.pdb")) + list(dir_path.glob("*.ent"))
+        cif_files = list(dir_path.glob("*.cif")) + list(dir_path.glob("*.mmcif"))
+        files = pdb_files + cif_files
+
+    else:  # list of files
+        files = [Path(f) if isinstance(f, str) else f for f in files]
+        for file_path in files:
+            if not file_path.exists():
+                raise FileNotFoundError(f"File does not exist: {file_path}")
+
+
+def _get_atoms_of(chain, heavy_only: bool = True) -> list:
     """
     Return a list of atoms from a Bio.PDB.Chain object.
 
@@ -114,27 +148,33 @@ def find_antibody_bound_antigen_chain(
         and the minimum distances for each antigen chain.
 
     """
-    # read input structure
+    # inputs
     if isinstance(file_path, str):
         file_path = Path(file_path)
     if not file_path.exists():
         raise FileNotFoundError(f"Input PDB/CIF file does not exist: {file_path}")
+
     struct = _get_structure(file_path)
 
-    # antigen chains
     if antigen_chains is None:
         antigen_chains = [
             c for c in struct.child_dict.keys() if c not in antibody_chains
         ]
 
-    # gather atoms
+    # get Ab and Ag atoms
     ab_atoms = []
     ag_atoms = {c: [] for c in antigen_chains}
+
     for ch in struct:
         if ch.id in antibody_chains:
-            ab_atoms.extend(atoms_of(ch))
+            ab_atoms.extend(_get_atoms_of(ch))
         elif ch.id in antigen_chains:
-            ag_atoms[ch.id].extend(atoms_of(ch))
+            ag_atoms[ch.id].extend(_get_atoms_of(ch))
+
+    if not ab_atoms:
+        raise ValueError(f"No antibody atoms found in chains: {antibody_chains}")
+    if not any(atoms for atoms in ag_atoms.values()):
+        raise ValueError(f"No antigen atoms found in chains: {antigen_chains}")
 
     # neighbour search
     ns = NeighborSearch(ab_atoms)
@@ -151,9 +191,12 @@ def find_antibody_bound_antigen_chain(
                 dmin = min(dmin, min((atom - a for a in near)))
         contact_counts[prt] = len(contacts)
         min_distances[prt] = dmin
+    if not contact_counts:
+        raise ValueError("No contacts found between antibody and antigen chains")
 
-    # pick protomer with most contacts (tie‑break by min distance)
+    # pick protomer with the most contacts (tie‑break by min distance)
     best = max(contact_counts, key=lambda c: (contact_counts[c], -min_distances[c]))
+
     return best, contact_counts, min_distances
 
 
@@ -167,6 +210,8 @@ def rmsd(
     file_path2: str,
     chains: str | list[str],
     atom_types: str | list[str] = ["CA"],
+    align_chains: str | list[str] | None = None,
+    align_antibody_bound_chain: bool = False,
     quiet: bool = True,
 ) -> float:
     """
@@ -185,6 +230,15 @@ def rmsd(
 
     atom_types : str or list[str], optional, default=["CA"]
         The atom type(s) to use for RMSD calculation. Default is CA atoms only.
+
+    align_chains : str or list[str] or None, optional, default=None
+        The chain ID(s) to use for structure alignment. If None, alignment will be based on
+        the antibody-bound chain or the chains specified in the chains parameter.
+
+    align_antibody_bound_chain : bool, optional, default=False
+        If True and align_chains is None, use the antibody-bound chain for alignment.
+        If False and align_chains is None, use the chains specified in the chains parameter
+        for both alignment and RMSD calculation.
 
     quiet : bool, optional, default=True
         Suppress verbose output from the PDB parser.
@@ -212,16 +266,36 @@ def rmsd(
         chains = [chains]
     if isinstance(atom_types, str):
         atom_types = [atom_types]
+    if isinstance(align_chains, str):
+        align_chains = [align_chains]
 
     # get structures
     struct1 = _get_structure(file_path1, quiet=quiet)
     struct2 = _get_structure(file_path2, quiet=quiet)
 
-    # extract specific atoms from specified chains
-    atoms1, atoms2 = [], []
+    # check RMSD chains first
     for chain_id in chains:
         if chain_id not in struct1.child_dict or chain_id not in struct2.child_dict:
-            raise ValueError(f"Chain {chain_id} not found in both structures")
+            raise ValueError(f"RMSD chain {chain_id} not found in both structures")
+
+    # determine alignment chains
+    if align_chains is None:
+        if align_antibody_bound_chain:
+            # find antibody-bound chain for alignment
+            ag_chain1, _, _ = find_antibody_bound_antigen_chain(file_path1)
+            ag_chain2, _, _ = find_antibody_bound_antigen_chain(file_path2)
+            align_chains = [
+                ag_chain1
+            ]  # use only the first structure's chain for alignment
+        else:
+            # use the same chains for both alignment and RMSD
+            align_chains = chains
+
+    # extract atoms for alignment
+    align_atoms1, align_atoms2 = [], []
+    for chain_id in align_chains:
+        if chain_id not in struct1.child_dict or chain_id not in struct2.child_dict:
+            raise ValueError(f"Alignment chain {chain_id} not found in both structures")
         chain1 = struct1[chain_id]
         chain2 = struct2[chain_id]
         # get atoms of specified types
@@ -238,119 +312,140 @@ def rmsd(
         # ensure same number of atoms
         if len(chain1_atoms) != len(chain2_atoms):
             raise ValueError(
-                f"Number of atoms in chain {chain_id} doesn't match between structures"
+                f"Number of atoms in alignment chain {chain_id} doesn't match between structures"
             )
-        atoms1.extend(chain1_atoms)
-        atoms2.extend(chain2_atoms)
+        align_atoms1.extend(chain1_atoms)
+        align_atoms2.extend(chain2_atoms)
 
     # verify that we have atoms to align
-    if not atoms1 or not atoms2:
-        raise ValueError(f"No matching atoms found in specified chains: {chains}")
+    if not align_atoms1 or not align_atoms2:
+        raise ValueError(f"No matching atoms found in alignment chains: {align_chains}")
 
     # superimpose structures
     sup = Superimposer()
-    sup.set_atoms(atoms1, atoms2)
+    sup.set_atoms(align_atoms1, align_atoms2)
 
-    return sup.rms
+    # apply rotation/translation to the entire second structure
+    sup.apply(struct2.get_atoms())
+
+    # extract atoms for RMSD calculation
+    rmsd_atoms1, rmsd_atoms2 = [], []
+    for chain_id in chains:
+        chain1 = struct1[chain_id]
+        chain2 = struct2[chain_id]
+        # get atoms of specified types
+        chain1_atoms = [
+            atom
+            for atom in chain1.get_atoms()
+            if atom.name in atom_types and atom.parent.id[0] == " "
+        ]
+        chain2_atoms = [
+            atom
+            for atom in chain2.get_atoms()
+            if atom.name in atom_types and atom.parent.id[0] == " "
+        ]
+        # ensure same number of atoms
+        if len(chain1_atoms) != len(chain2_atoms):
+            raise ValueError(
+                f"Number of atoms in RMSD chain {chain_id} doesn't match between structures"
+            )
+        rmsd_atoms1.extend(chain1_atoms)
+        rmsd_atoms2.extend(chain2_atoms)
+
+    # verify that we have atoms for RMSD calculation
+    if not rmsd_atoms1 or not rmsd_atoms2:
+        raise ValueError(f"No matching atoms found in RMSD chains: {chains}")
+
+    # calculate RMSD
+    return np.sqrt(
+        np.mean(
+            np.sum(
+                (
+                    np.array([a.coord for a in rmsd_atoms1])
+                    - np.array([a.coord for a in rmsd_atoms2])
+                )
+                ** 2,
+                axis=1,
+            )
+        )
+    )
 
 
 def ssRMSD(
-    files: list[str] | str,
-    chains: str | list[str],
+    file_paths: str | list[str],
+    antibody_chains: str | list[str] = ["A", "B"],
+    antigen_chains: str | list[str] | None = None,
     atom_types: str | list[str] = ["CA"],
-    quiet: bool = True,
-    log_dir: str | Path | None = None,
+    align_antibody_bound_chain: bool = False,
+    log_dir: str | None = None,
 ) -> float:
     """
-    Calculate the sum of squared RMSD values for all pairs of PDB/CIF files.
+    Calculate the sum of squared RMSD values between all pairs of structures.
 
     Parameters
     ----------
-    files : list[str] or str
-        Either a list of PDB/CIF file paths or a directory path containing PDB/CIF files.
+    file_paths : str or list[str]
+        Path to a directory containing PDB/CIF files or a list of file paths.
 
-    chains : str or list[str]
-        The chain ID(s) for which to calculate RMSD.
+    antibody_chains : str or list[str], optional, default=["A", "B"]
+        Chain ID(s) for which to calculate RMSD. Default is ["A", "B"].
+
+    antigen_chains : str or list[str] or None, optional, default=None
+        Chain ID(s) for which to calculate RMSD. If not provided, the function will
+        use find_antibody_bound_antigen_chain to identify the appropriate chain.
 
     atom_types : str or list[str], optional, default=["CA"]
-        The atom type(s) to use for RMSD calculation. Default is CA atoms only.
+        Atom type(s) to use for RMSD calculation.
 
-    quiet : bool, optional, default=True
-        Suppress verbose output from the PDB parser.
-
-    log_dir : str or Path or None, optional, default=None
-        Directory path to save CSV log file with individual RMSD values.
-        If not provided, no log file will be generated.
+    log_dir : str or None, optional, default=None
+        Directory to save RMSD values in a CSV file.
 
     Returns
     -------
     float
-        The sum of squared RMSD values.
+        Sum of squared RMSD values between all pairs of structures.
 
     Raises
     ------
-    ValueError
-        If less than two files are provided or found in the specified directory.
     FileNotFoundError
-        If the specified directory or files do not exist.
+        If the directory does not exist.
+    ValueError
+        If less than two PDB/CIF files are provided.
     """
+    # convert to Path objects and get list of files
+    file_paths = _get_pdb_and_cif_files(file_paths)
 
-    # input is a directory
-    if isinstance(files, str):
-        dir_path = Path(files)
-        if not dir_path.exists():
-            raise FileNotFoundError(f"Directory does not exist: {dir_path}")
-        if not dir_path.is_dir():
-            raise ValueError(f"Path is not a directory: {dir_path}")
+    if len(file_paths) < 2:
+        raise ValueError("At least two PDB/CIF files are required")
 
-        # Get all PDB and CIF files in the directory
-        pdb_files = list(dir_path.glob("*.pdb")) + list(dir_path.glob("*.ent"))
-        cif_files = list(dir_path.glob("*.cif")) + list(dir_path.glob("*.mmcif"))
-        files = pdb_files + cif_files
-    else:
-        # convert string paths to Path objects
-        files = [Path(f) if isinstance(f, str) else f for f in files]
-
-        # verify all files exist
-        for file_path in files:
-            if not file_path.exists():
-                raise FileNotFoundError(f"File does not exist: {file_path}")
-
-    # need at least 2 files for pairwise comparisons
-    if len(files) < 2:
-        raise ValueError("At least two PDB/CIF files are required for RMSD calculation")
-
-    # create log directory if provided and it doesn't exist
-    if log_dir is not None:
-        log_dir = Path(log_dir)
-        log_dir.mkdir(parents=True, exist_ok=True)
-
-    # calculate RMSD for each pair of files
+    # calculate RMSD between all pairs of files and store results
     rmsd_data = []
-    for file1, file2 in itertools.combinations(files, 2):
-        # pair_key = (str(file1), str(file2))
+    for file1, file2 in itertools.combinations(file_paths, 2):
         try:
-            rmsd_val = rmsd(file1, file2, chains, atom_types, quiet)
+            rmsd_val = rmsd(
+                file1,
+                file2,
+                chains=antibody_chains,
+                align_chains=antigen_chains,
+                atom_types=atom_types,
+                align_antibody_bound_chain=align_antibody_bound_chain,
+            )
             rmsd_data.append(
-                {"filepath_1": file1, "filepath_2": file2, "rmsd": rmsd_val}
+                {"filepath_1": str(file1), "filepath_2": str(file2), "rmsd": rmsd_val}
             )
         except Exception as e:
-            print(f"Error calculating RMSD for {file1} and {file2}: {e}")
+            print(f"Error calculating RMSD for {file1} and {file2}: {str(e)}")
             continue
 
-    # calculate sum of squared RMSD values
-    rmsd_values = [r["rmsd"] for r in rmsd_data]
-    ss_rmsd = np.sum(np.square(rmsd_values))
-
-    # wave RMSD values to CSV if log directory is provided
+    # save RMSD values to CSV if log_dir is provided
     if log_dir is not None and rmsd_data:
-        # create DataFrame and save to CSV
+        log_dir = Path(log_dir)
+        log_dir.mkdir(parents=True, exist_ok=True)
         df = pd.DataFrame(rmsd_data)
-        # save to CSV
-        csv_path = os.path.join(log_dir, "rmsd_values.csv")
-        df.to_csv(csv_path, index=False)
+        df.to_csv(log_dir / "rmsd_values.csv", index=False)
 
-    return ss_rmsd
+    # return sum of squared RMSD values
+    return sum(entry["rmsd"] ** 2 for entry in rmsd_data)
 
 
 # -----------------------------------------
@@ -392,45 +487,38 @@ def identify_contacts(
         A set of ((ab_residue_id, ab_atom_id), (ag_residue_id, ag_atom_id)) tuples
         representing contacts between antibody and antigen atoms.
     """
-    # Convert file_path to Path if it's a string
+    # inputs
     if isinstance(file_path, str):
         file_path = Path(file_path)
 
-    # read input structure
-    struct = _get_structure(file_path, quiet=quiet)
-
-    # If antigen_chains is None, find the antigen chain with most contacts
     if antigen_chains is None:
         ag_chain, _, _ = find_antibody_bound_antigen_chain(
             file_path, antibody_chains=antibody_chains, cut_off=cut_off
         )
         antigen_chains = [ag_chain]
 
-    # gather antibody atoms
+    struct = _get_structure(file_path, quiet=quiet)
+
+    # gather Ab atoms
     ab_atoms = []
+
     for ch in struct:
         if ch.id in antibody_chains:
-            ab_atoms.extend(atoms_of(ch))
-
-    # Handle case when no antibody atoms are found (e.g., chain doesn't exist)
+            ab_atoms.extend(_get_atoms_of(ch))
     if not ab_atoms:
         return set()
 
-    # gather antigen atoms and identify contacts
+    # gather Ag atoms and identify contacts
     contacts = set()
     for ch in struct:
         if ch.id in antigen_chains:
-            ag_atoms = atoms_of(ch)
-
-            # Skip if no antigen atoms are found in this chain
+            ag_atoms = _get_atoms_of(ch)
             if not ag_atoms:
                 continue
-
-            # Use NeighborSearch to find atoms within cut_off distance
+            # find atoms within cut_off distance
             ns = NeighborSearch(ab_atoms)
             for ag_atom in ag_atoms:
                 for ab_atom in ns.search(ag_atom.coord, cut_off, level="A"):
-                    # Store a unique identifier for the contact
                     ab_id = (ab_atom.get_parent().id, ab_atom.get_id())
                     ag_id = (ag_atom.get_parent().id, ag_atom.get_id())
                     contacts.add((ab_id, ag_id))
@@ -557,25 +645,7 @@ def mean_fnat(
         antibody_chains = [antibody_chains]
 
     # Handle files input (directory or list of files)
-    if isinstance(files, str):
-        dir_path = Path(files)
-        if not dir_path.exists():
-            raise FileNotFoundError(f"Directory does not exist: {dir_path}")
-        if not dir_path.is_dir():
-            raise ValueError(f"Path is not a directory: {dir_path}")
-
-        # Get all PDB and CIF files in the directory
-        pdb_files = list(dir_path.glob("*.pdb")) + list(dir_path.glob("*.ent"))
-        cif_files = list(dir_path.glob("*.cif")) + list(dir_path.glob("*.mmcif"))
-        files = pdb_files + cif_files
-    else:
-        # convert string paths to Path objects
-        files = [Path(f) if isinstance(f, str) else f for f in files]
-
-        # verify all files exist
-        for file_path in files:
-            if not file_path.exists():
-                raise FileNotFoundError(f"File does not exist: {file_path}")
+    files = _get_pdb_and_cif_files(files)
 
     # need at least 2 files for pairwise comparisons
     if len(files) < 2:
@@ -655,41 +725,38 @@ def identify_interface_residues(
     tuple
         A tuple containing two lists: antibody interface residues and antigen interface residues.
     """
-    # convert file_path to Path if it's a string
+    # inputs
     if isinstance(file_path, str):
         file_path = Path(file_path)
-
-    # read input structure
-    struct = _get_structure(file_path, quiet=quiet)
-
-    # rf antigen_chains is None, find the antigen chain with most contacts
     if antigen_chains is None:
         ag_chain, _, _ = find_antibody_bound_antigen_chain(
             file_path, antibody_chains=antibody_chains, cut_off=5.0
         )
         antigen_chains = [ag_chain]
 
-    # gather antibody and antigen atoms
+    struct = _get_structure(file_path, quiet=quiet)
+
+    # gather Ab and Ag atoms
     ab_atoms = []
     ag_atoms = []
+
     for ch in struct:
         if ch.id in antibody_chains:
-            ab_atoms.extend(atoms_of(ch))
+            ab_atoms.extend(_get_atoms_of(ch))
         elif ch.id in antigen_chains:
-            ag_atoms.extend(atoms_of(ch))
+            ag_atoms.extend(_get_atoms_of(ch))
 
-    # handle case when no atoms are found
     if not ab_atoms or not ag_atoms:
         return [], []
 
-    # identify antibody interface residues
+    # identify Ab interface residues
     ab_interface_residues = set()
     ns_ag = NeighborSearch(ag_atoms)
     for ab_atom in ab_atoms:
         if ns_ag.search(ab_atom.coord, interface_cutoff, level="A"):
             ab_interface_residues.add(ab_atom.get_parent())
 
-    # identify antigen interface residues
+    # identify Ag interface residues
     ag_interface_residues = set()
     ns_ab = NeighborSearch(ab_atoms)
     for ag_atom in ag_atoms:
@@ -881,48 +948,26 @@ def mean_iRMSD(
     FileNotFoundError
         If the specified directory or files do not exist.
     """
-    # convert antibody_chains to list if it's a string
+    # inputs
     if isinstance(antibody_chains, str):
         antibody_chains = [antibody_chains]
+    if isinstance(antigen_chains, str) and antigen_chains is not None:
+        antigen_chains = [antigen_chains]
 
-    # handle input files (directory or list of files)
-    if isinstance(files, str):
-        dir_path = Path(files)
-        if not dir_path.exists():
-            raise FileNotFoundError(f"Directory does not exist: {dir_path}")
-        if not dir_path.is_dir():
-            raise ValueError(f"Path is not a directory: {dir_path}")
-
-        # get all PDB and CIF files in the directory
-        pdb_files = list(dir_path.glob("*.pdb")) + list(dir_path.glob("*.ent"))
-        cif_files = list(dir_path.glob("*.cif")) + list(dir_path.glob("*.mmcif"))
-        files = pdb_files + cif_files
-    else:
-        # convert string paths to Path objects
-        files = [Path(f) if isinstance(f, str) else f for f in files]
-
-        # verify all files exist
-        for file_path in files:
-            if not file_path.exists():
-                raise FileNotFoundError(f"File does not exist: {file_path}")
-
-    # need at least 2 files for pairwise comparisons
+    files = _get_pdb_and_cif_files(files)
     if len(files) < 2:
         raise ValueError(
             "At least two PDB/CIF files are required for iRMSD calculation"
         )
 
-    # create log directory if provided and it doesn't exist
+    # logging
     if log_dir is not None:
         log_dir = Path(log_dir)
         log_dir.mkdir(parents=True, exist_ok=True)
 
-    # convert antigen_chains to list if it's a string
-    if isinstance(antigen_chains, str) and antigen_chains is not None:
-        antigen_chains = [antigen_chains]
-
     # calculate iRMSD for all combinations of file pairs
     irmsd_data = []
+
     for file1, file2 in itertools.combinations(files, 2):
         try:
             irmsd_val = iRMSD(
@@ -941,7 +986,7 @@ def mean_iRMSD(
             print(f"Error calculating iRMSD for {file1} and {file2}: {e}")
             continue
 
-    # calculate mean iRMSD value
+    # calculate mean iRMSD
     if not irmsd_data:
         return 0.0  # return 0 if no valid iRMSD calculations
 
@@ -1001,7 +1046,7 @@ def chain_COM_distance(
         Dictionary mapping each antibody chain to the distance (in Ångstroms) between
         the centers of mass of that chain in the two structures.
     """
-    # Convert paths and parameters to appropriate types
+    # inputs
     if isinstance(filepath_1, str):
         filepath_1 = Path(filepath_1)
     if isinstance(filepath_2, str):
@@ -1014,11 +1059,11 @@ def chain_COM_distance(
     if isinstance(atom_types, str):
         atom_types = [atom_types]
 
-    # Get structures
+    # get structures
     struct1 = _get_structure(filepath_1, quiet=quiet)
     struct2 = _get_structure(filepath_2, quiet=quiet)
 
-    # Determine antigen chains if not provided
+    # determine Ag chains if not provided
     if antigen_chains is None:
         antigen_chain1, _, _ = find_antibody_bound_antigen_chain(
             filepath_1, antibody_chains=antibody_chains
@@ -1026,10 +1071,9 @@ def chain_COM_distance(
         antigen_chain2, _, _ = find_antibody_bound_antigen_chain(
             filepath_2, antibody_chains=antibody_chains
         )
-        # Use only the antigen chain from the first structure for alignment
         antigen_chains = [antigen_chain1]
 
-    # Extract atoms from antigen chains for alignment
+    # extract atoms from Ag chains for alignment
     antigen_atoms1 = []
     antigen_atoms2 = []
 
@@ -1049,29 +1093,28 @@ def chain_COM_distance(
                 if atom.name in atom_types and atom.parent.id[0] == " "
             ]
 
-            # Only add atoms if they match in number
+            # only add atoms if they match in number
             if len(chain1_atoms) == len(chain2_atoms):
                 antigen_atoms1.extend(chain1_atoms)
                 antigen_atoms2.extend(chain2_atoms)
 
-    # Ensure we have atoms to align
+    # ensure we have atoms to align
     if not antigen_atoms1 or not antigen_atoms2:
         raise ValueError(
             f"No matching antigen atoms found in specified chains: {antigen_chains}"
         )
 
-    # Superimpose structures based on antigen atoms
+    # superimpose structures based on Ag atoms
     sup = Superimposer()
     sup.set_atoms(antigen_atoms1, antigen_atoms2)
 
-    # Apply rotation/translation to the entire second structure
+    # apply rotation/translation to the entire second structure
     sup.apply(struct2.get_atoms())
 
-    # Calculate center of mass for each antibody chain in both structures
+    # calculate CoM for each Ab chain in both structures
     results = {}
     for chain_id in antibody_chains:
         if chain_id in struct1.child_dict and chain_id in struct2.child_dict:
-            # Get atoms for COM calculation
             chain1_atoms = [
                 atom
                 for atom in struct1[chain_id].get_atoms()
@@ -1083,12 +1126,12 @@ def chain_COM_distance(
                 if atom.name in atom_types and atom.parent.id[0] == " "
             ]
 
-            # Calculate center of mass for each chain
+            # calculate CoM for each chain
             if chain1_atoms and chain2_atoms:
                 com1 = np.mean([atom.coord for atom in chain1_atoms], axis=0)
                 com2 = np.mean([atom.coord for atom in chain2_atoms], axis=0)
 
-                # Calculate Euclidean distance between centers of mass
+                # calculate Euclidean distance between CoMs
                 distance = np.sqrt(np.sum((com1 - com2) ** 2))
                 results[chain_id] = distance
 
@@ -1135,51 +1178,27 @@ def mean_COM_distance(
         Dictionary mapping each antibody chain to the sum of squared distances (in Ångstroms)
         between the centers of mass of that chain across all file pairs.
     """
-    # Convert antibody_chains to list if it's a string
+    # inputs
     if isinstance(antibody_chains, str):
         antibody_chains = [antibody_chains]
+    if isinstance(antigen_chains, str) and antigen_chains is not None:
+        antigen_chains = [antigen_chains]
 
-    # Handle input files (directory or list of files)
-    if isinstance(files, str):
-        dir_path = Path(files)
-        if not dir_path.exists():
-            raise FileNotFoundError(f"Directory does not exist: {dir_path}")
-        if not dir_path.is_dir():
-            raise ValueError(f"Path is not a directory: {dir_path}")
-
-        # Get all PDB and CIF files in the directory
-        pdb_files = list(dir_path.glob("*.pdb")) + list(dir_path.glob("*.ent"))
-        cif_files = list(dir_path.glob("*.cif")) + list(dir_path.glob("*.mmcif"))
-        files = pdb_files + cif_files
-    else:
-        # Convert string paths to Path objects
-        files = [Path(f) if isinstance(f, str) else f for f in files]
-
-        # Verify all files exist
-        for file_path in files:
-            if not file_path.exists():
-                raise FileNotFoundError(f"File does not exist: {file_path}")
-
-    # Need at least 2 files for pairwise comparisons
+    files = _get_pdb_and_cif_files(files)
     if len(files) < 2:
         raise ValueError(
             "At least two PDB/CIF files are required for COM distance calculation"
         )
 
-    # Create log directory if provided and it doesn't exist
+    # logging
     if log_dir is not None:
         log_dir = Path(log_dir)
         log_dir.mkdir(parents=True, exist_ok=True)
 
-    # Convert antigen_chains to list if it's a string
-    if isinstance(antigen_chains, str) and antigen_chains is not None:
-        antigen_chains = [antigen_chains]
-
-    # Initialize results dictionary and data collection for logging
+    # calculate CmM distances for all file combinations
     ss_distances = {chain: 0.0 for chain in antibody_chains}
     com_data = []
 
-    # Calculate COM distances for all combinations of file pairs
     for file1, file2 in itertools.combinations(files, 2):
         try:
             distances = chain_COM_distance(
@@ -1190,12 +1209,8 @@ def mean_COM_distance(
                 atom_types,
                 quiet,
             )
-
-            # Add distances to sum of squares for each chain
             for chain, distance in distances.items():
                 ss_distances[chain] += distance**2
-
-            # Store data for logging
             data_entry = {"filepath_1": file1, "filepath_2": file2}
             for chain, distance in distances.items():
                 data_entry[f"chain_{chain}_distance"] = distance
@@ -1205,10 +1220,255 @@ def mean_COM_distance(
             print(f"Error calculating COM distance for {file1} and {file2}: {e}")
             continue
 
-    # Save COM distance values to CSV if log directory is provided
+    # save CoM distance values to CSV if log directory is provided
     if log_dir is not None and com_data:
         df = pd.DataFrame(com_data)
         csv_path = os.path.join(log_dir, "com_distance.csv")
         df.to_csv(csv_path, index=False)
 
     return ss_distances
+
+
+# -----------------------------------------
+#           Approach Angle
+# -----------------------------------------
+
+
+def approach_angle(
+    file_path: str | Path,
+    antibody_chains: str | list[str] = ["A", "B"],
+    antigen_chains: str | list[str] | None = None,
+    interface_cutoff: float = 5.0,
+    atom_types: str | list[str] = ["CA"],
+    quiet: bool = True,
+) -> float:
+    """
+    Calculate the angle of approach of an antibody bound to an antigen.
+
+    The angle is calculated using three points:
+    1. Center of mass of the antigen (using only antibody-bound chain)
+    2. Center of mass of the antibody/antigen interface (antigen atoms within interface_cutoff of antibody)
+    3. Center of mass of the antibody (all atoms from antibody chains)
+
+    Parameters
+    ----------
+    file_path : str or Path
+        The path to the PDB/CIF file.
+
+    antibody_chains : str or list[str], optional, default=["A", "B"]
+        The chain ID(s) to consider as antibody. Can be a single chain or multiple chains.
+
+    antigen_chains : str or list[str] or None, optional, default=None
+        The chain ID(s) to consider as antigen. If not provided, the function will
+        use find_antibody_bound_antigen_chain to identify the appropriate chain.
+
+    interface_cutoff : float, optional, default=5.0
+        The cutoff distance (in Ångstroms) for an antigen atom to be considered part of the interface.
+
+    atom_types : str or list[str], optional, default=["CA"]
+        The atom type(s) to use for center of mass calculations. Default is CA atoms only.
+
+    quiet : bool, optional, default=True
+        Suppress verbose output from the PDB parser.
+
+    Returns
+    -------
+    float
+        The angle of approach in degrees.
+    """
+    if isinstance(file_path, str):
+        file_path = Path(file_path)
+    if isinstance(antibody_chains, str):
+        antibody_chains = [antibody_chains]
+    if isinstance(atom_types, str):
+        atom_types = [atom_types]
+
+    struct = _get_structure(file_path, quiet=quiet)
+
+    # determine antigen chain (if not provided)
+    if antigen_chains is None:
+        ag_chain, _, _ = find_antibody_bound_antigen_chain(
+            file_path, antibody_chains=antibody_chains, cut_off=interface_cutoff
+        )
+        antigen_chains = [ag_chain]
+    elif isinstance(antigen_chains, str):
+        antigen_chains = [antigen_chains]
+
+    # Ab and Ag atoms
+    ab_atoms = []
+    ag_atoms = []
+
+    for ch in struct:
+        if ch.id in antibody_chains:
+            chain_atoms = [
+                atom
+                for atom in ch.get_atoms()
+                if atom.name in atom_types and atom.parent.id[0] == " "
+            ]
+            ab_atoms.extend(chain_atoms)
+        elif ch.id in antigen_chains:
+            chain_atoms = [
+                atom
+                for atom in ch.get_atoms()
+                if atom.name in atom_types and atom.parent.id[0] == " "
+            ]
+            ag_atoms.extend(chain_atoms)
+    if not ab_atoms:
+        raise ValueError(f"No antibody atoms found in chains: {antibody_chains}")
+    if not ag_atoms:
+        raise ValueError(f"No antigen atoms found in chains: {antigen_chains}")
+
+    # calculate Ab and Ag CoM
+    ab_com = np.mean([atom.coord for atom in ab_atoms], axis=0)
+    ag_com = np.mean([atom.coord for atom in ag_atoms], axis=0)
+
+    # identify interface atoms (Ag atoms within interface_cutoff of any Ab atom)
+    ns = NeighborSearch(ab_atoms)
+    interface_atoms = []
+    for ag_atom in ag_atoms:
+        if ns.search(ag_atom.coord, interface_cutoff, level="A"):
+            interface_atoms.append(ag_atom)
+    if not interface_atoms:
+        raise ValueError(f"No interface atoms found within {interface_cutoff}Å cutoff")
+
+    # calculate interface CoM
+    interface_com = np.mean([atom.coord for atom in interface_atoms], axis=0)
+
+    # calculate approach angle
+    vec1 = ag_com - interface_com  # vector from interface to antigen COM
+    unit_vec1 = vec1 / np.linalg.norm(vec1)
+    vec2 = ab_com - interface_com  # vector from interface to antibody COM
+    unit_vec2 = vec2 / np.linalg.norm(vec2)
+    dot_product = np.clip(np.dot(unit_vec1, unit_vec2), -1.0, 1.0)
+    angle = np.degrees(np.arccos(dot_product))
+
+    return angle
+
+    # # Calculate angle between vectors
+    # norm1 = np.linalg.norm(vec1)
+    # norm2 = np.linalg.norm(vec2)
+
+    # # Handle case when vectors have zero magnitude
+    # if norm1 < 1e-6 or norm2 < 1e-6:
+    #     raise ValueError(
+    #         "Unable to calculate approach angle: zero-magnitude vector detected"
+    #     )
+
+    # # Calculate dot product and handle numerical precision issues
+    # dot_product = np.dot(vec1, vec2)
+    # cos_angle = dot_product / (norm1 * norm2)
+
+    # # Ensure cos_angle is within valid range [-1, 1] to avoid NaN results
+    # cos_angle = max(min(cos_angle, 1.0), -1.0)
+
+    # # Calculate angle in radians and convert to degrees
+    # angle_rad = np.arccos(cos_angle)
+    # angle_deg = np.degrees(angle_rad)
+
+    # return angle_deg
+
+
+def approach_angle_variance(
+    files: list[str] | str,
+    antibody_chains: str | list[str] = ["A", "B"],
+    antigen_chains: str | list[str] | None = None,
+    interface_cutoff: float = 5.0,
+    atom_types: str | list[str] = ["CA"],
+    quiet: bool = True,
+    log_dir: str | Path | None = None,
+) -> float:
+    """
+    Calculate the variance in the angle of approach for multiple PDB/CIF files.
+
+    Parameters
+    ----------
+    files : list[str] or str
+        Either a list of PDB/CIF file paths or a directory path containing PDB/CIF files.
+
+    antibody_chains : str or list[str], optional, default=["A", "B"]
+        The chain ID(s) to consider as antibody. Can be a single chain or multiple chains.
+
+    antigen_chains : str or list[str] or None, optional, default=None
+        The chain ID(s) to consider as antigen. If not provided, the function will
+        use find_antibody_bound_antigen_chain to identify the appropriate chain.
+
+    interface_cutoff : float, optional, default=5.0
+        The cutoff distance (in Ångstroms) for an antigen atom to be considered part of the interface.
+
+    atom_types : str or list[str], optional, default=["CA"]
+        The atom type(s) to use for center of mass calculations. Default is CA atoms only.
+
+    quiet : bool, optional, default=True
+        Suppress verbose output from the PDB parser.
+
+    log_dir : str or Path or None, optional, default=None
+        Directory path to save CSV log file with individual approach angle values.
+        If not provided, no log file will be generated.
+
+    Returns
+    -------
+    float
+        The variance in approach angle across all files.
+
+    Raises
+    ------
+    ValueError
+        If less than two files are provided or found in the specified directory.
+
+    FileNotFoundError
+        If the specified directory or files do not exist.
+    """
+    # inputs
+    if isinstance(antibody_chains, str):
+        antibody_chains = [antibody_chains]
+    if isinstance(antigen_chains, str) and antigen_chains is not None:
+        antigen_chains = [antigen_chains]
+
+    files = _get_pdb_and_cif_files(files)
+    if len(files) < 2:
+        raise ValueError(
+            "At least two PDB/CIF files are required for approach angle variance calculation"
+        )
+
+    # logging
+    if log_dir is not None:
+        log_dir = Path(log_dir)
+        log_dir.mkdir(parents=True, exist_ok=True)
+
+    # calculate approach angle for each file
+    angle_data = []
+    angles = []
+
+    for file_path in files:
+        try:
+            angle = approach_angle(
+                file_path,
+                antibody_chains,
+                antigen_chains,
+                interface_cutoff,
+                atom_types,
+                quiet,
+            )
+            angles.append(angle)
+            angle_data.append({"filepath": str(file_path), "approach_angle": angle})
+        except Exception as e:
+            print(f"Error calculating approach angle for {file_path}: {e}")
+            continue
+
+    # angle of approach variance
+    if not angles:
+        variance = 0.0  # Return 0 if no valid angle calculations
+    else:
+        variance = np.var(angles)
+
+    # save approach angle results and stats to CSV if log directory is provided
+    if log_dir is not None and angle_data:
+        df = pd.DataFrame(angle_data)
+        stats_df = pd.DataFrame([{"metric": "variance", "value": variance}])
+        # save results and stats
+        csv_path = os.path.join(log_dir, "approach_angles.csv")
+        df.to_csv(csv_path, index=False)
+        stats_path = os.path.join(log_dir, "approach_angle_stats.csv")
+        stats_df.to_csv(stats_path, index=False)
+
+    return variance
