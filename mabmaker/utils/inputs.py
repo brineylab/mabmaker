@@ -11,11 +11,16 @@ from pathlib import Path
 from typing import Iterable
 
 import abutils
+import polars as pl
 import yaml
 from magika import Magika
 from natsort import natsorted
 
 from .mixins import BoltzFormattingMixin, ChaiFormattingMixin, ProtenixFormattingMixin
+
+# --------------------------------
+#       STRUCTURE PREDICTION
+# --------------------------------
 
 
 def setup_structure_prediction_run(
@@ -550,3 +555,165 @@ class StructurePredictionInput:
 class StructurePredictionJob:
     def __init__(self, job_data: dict):
         self.job_data = job_data
+
+
+# --------------------------------
+#         JSON INPUTS
+# --------------------------------
+
+
+def distribute(
+    distribute_from: str,
+    distribute_to: str,
+    output_path: str,
+    seeds: int | Iterable[int] | None = None,
+    use_seeds_from_input: bool = False,
+    format: str = "csv",
+    separator: str = "\t",
+    input_count: int = 1,
+    input_sequence_fields: str | Iterable[str] | None = None,
+    input_name_field: str | None = None,
+    input_count_field: str | None = None,
+) -> None:
+    """
+    Distribute an input JSON file into multiple jobs.
+    """
+    pass
+
+
+def distribute_antigen(
+    antibody_path: str,
+    antigen_path: str,
+    output_path: str,
+    heavy_field: str = "sequence_aa:0",
+    light_field: str = "sequence_aa:1",
+    name_field: str = "pair_id",
+    format: str = "csv",
+    separator: str = "\t",
+    antibody_count: int = 1,
+    antigen_name: str | None = None,
+    seeds: int | Iterable[int] | None = None,
+) -> None:
+    """
+    Generate an input JSON file for structure precition of multiple antibodies,
+    each against the same antigen. Antibody heavy and light chains will always be
+    chains A and B, respectively, and antigen chains will be chains C, D, etc.
+    For a single-chain antibody (a camelid VHH, for example), the antibody will be
+    chain A and the antigen will be chains B, C, etc.
+
+    The antigen file should be an AlphaFoldServer-formatted JSON file, potentially
+    containing multiple chains, glycans, and/or multiple copies of one or more chains.
+
+    By default, the antibody file is expected to adopt a modified "paired" version of the
+    standard AIRR format. All of the fields match the `AIRR annotattion standard`_, but
+    heavy chain annotation fields are suffixed with ":0" and light chain annotation fields
+    are suffixed with ":1". Many aspects of the antibody file can be customized, including
+    the field used to identify the antibody pair, the delimiter, and the fields used to
+    identify the heavy and light chains.
+
+    Parameters
+    ----------
+    antibody_path : str
+        Path to the antibody file. By default, the file is expected to be a tab-delimited
+        file using a modified "paired"version of the `AIRR annotation standard`_.
+
+    antigen_path : str
+        Path to the antigen JSON file.
+
+    output_path : str
+        Path to the output JSON file.
+
+    heavy_field : str, optional, default="sequence_aa:0"
+        The field used to identify the heavy chain.
+
+    light_field : str, optional, default="sequence_aa:1"
+        The field used to identify the light chain.
+
+    name_field : str, optional, default="pair_id"
+        The field used to identify the antibody pair.
+
+    format : str, optional, default="csv"
+        The format of the antibody file. Options are "csv" and "parquet".
+
+    separator : str, optional, default="\t"
+        The separator used in the antibody file.
+
+    antigen_name : str | None, optional, default=None
+        The name of the antigen. This will override the ``"name"`` field in the antigen
+        JSON file.
+
+    seeds : int | Iterable[int] | None, optional, default=None
+        Random seeds. If not provided, the seeds from the antigen file will be used.
+
+    Returns
+    -------
+    None
+
+    .. _AIRR annotation standard: https://docs.airr-community.org/en/stable/datarep/rearrangements.html
+
+    """
+    # read antigen data
+    with open(antigen_path, "r") as f:
+        ag_data = json.load(f)
+    ag_name = antigen_name or ag_data["name"]
+    ag_sequences = ag_data.get("sequences", [])
+    ag_seeds = ag_data.get("modelSeeds", [42])
+
+    # read antibody data
+    if format == "csv":
+        ab_data = pl.read_csv(antibody_path, separator=separator)
+    elif format == "parquet":
+        ab_data = pl.read_parquet(antibody_path)
+    else:
+        raise ValueError(f"Invalid file format: {format}")
+    if not any(field in ab_data.columns for field in [heavy_field, light_field]):
+        raise ValueError(
+            f"Heavy and light chain fields not found in antibody file: {heavy_field} and {light_field}"
+        )
+    if name_field not in ab_data.columns:
+        raise ValueError(
+            f"Antibody name field not found in antibody file: {name_field}"
+        )
+
+    # seeds
+    if seeds is None:
+        seeds = ag_seeds
+    if isinstance(seeds, int):
+        seeds = [seeds]
+    seeds = list(set(seeds))
+
+    # build replicated JSON data
+    replicated_data = []
+    for i, row in enumerate(ab_data.iter_rows(named=True)):
+        ab_name = row[name_field]
+        ab_sequences = []
+        if heavy_field in row:
+            ab_sequences.append(
+                {
+                    "proteinChain": {
+                        "sequence": row[heavy_field],
+                        "count": antibody_count,
+                    }
+                }
+            )
+        if light_field in row:
+            ab_sequences.append(
+                {
+                    "proteinChain": {
+                        "sequence": row[light_field],
+                        "count": antibody_count,
+                    }
+                }
+            )
+        replicated_data.append(
+            {
+                "name": f"{ab_name}__{ag_name}",
+                "modelSeeds": seeds,
+                "sequences": ab_sequences + ag_sequences,
+                "dialect": "alphafoldserver",
+                "version": 1,
+            }
+        )
+    # write to file
+    with open(output_path, "w") as f:
+        json.dump(replicated_data, f, indent=4)
