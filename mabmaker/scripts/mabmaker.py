@@ -549,6 +549,7 @@ def chai(
 def boltz(
     json_path: str,
     output_path: str,
+    model: str = "boltz2",
     gpus: int | Iterable[int] | None = None,
     use_msa_server: bool = True,
     msa_server_url: str = "https://api.colabfold.com",
@@ -565,6 +566,11 @@ def boltz(
     write_full_pde: bool = True,
     cache: str = "~/.boltz",
     compress_output: bool = False,
+    # Boltz-2 only
+    affinity_mw_correction: bool = False,
+    sampling_steps_affinity: int = 200,
+    diffusion_samples_affinity: int = 5,
+    affinity_checkpoint: str | None = None,
 ) -> None:
     """
     Structure prediction with Boltz-1.
@@ -572,6 +578,7 @@ def boltz(
     run_boltz(
         json_path=os.path.expanduser(json_path),
         output_path=os.path.expanduser(output_path),
+        model=model,
         gpus=gpus,
         use_msa_server=use_msa_server,
         msa_server_url=msa_server_url,
@@ -588,4 +595,9 @@ def boltz(
         write_full_pde=write_full_pde,
         cache=cache,
         compress_output=compress_output,
+        # Boltz-2 only
+        affinity_mw_correction=affinity_mw_correction,
+        sampling_steps_affinity=sampling_steps_affinity,
+        diffusion_samples_affinity=diffusion_samples_affinity,
+        affinity_checkpoint=affinity_checkpoint,
     )
