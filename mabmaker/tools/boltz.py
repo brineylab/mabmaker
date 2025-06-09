@@ -25,6 +25,7 @@ def boltz(
     json_path: str,
     output_path: str,
     gpus: int | Iterable[int] | None = None,
+    model: str = "boltz2",
     use_msa_server: bool = True,
     msa_server_url: str = "https://api.colabfold.com",
     use_msa_cache: bool = True,
@@ -32,7 +33,7 @@ def boltz(
     recycling_steps: int = 3,
     sampling_steps: int = 200,
     diffusion_samples: int = 5,
-    step_scale: float = 1.638,
+    step_scale: float | None = None,
     output_format: str = "mmcif",
     override: bool = False,
     msa_pairing_strategy: str = "greedy",
@@ -40,6 +41,11 @@ def boltz(
     write_full_pde: bool = True,
     cache: str = "~/.boltz",
     compress_output: bool = False,
+    # Boltz-2 only
+    affinity_mw_correction: bool = False,
+    sampling_steps_affinity: int = 200,
+    diffusion_samples_affinity: int = 5,
+    affinity_checkpoint: str | None = None,
 ) -> None:
     """
     Structure prediction with `Boltz-1`_.
@@ -134,6 +140,15 @@ def boltz(
     gpu_queue = get_gpu_queue(gpus)
     num_gpus = gpu_queue.qsize()
 
+    # set appropriate step scale
+    if step_scale is None:
+        if model == "boltz1":
+            step_scale = 1.638
+        elif model == "boltz2":
+            step_scale = 1.5
+        else:
+            raise ValueError(f"Invalid model name: {model}")
+
     # run predictions
     futures = []
     output_paths = []
@@ -146,6 +161,7 @@ def boltz(
                 cmd = _build_boltz_command(
                     run=run,
                     output_path=_output_path,
+                    model=model,
                     use_msa_server=use_msa_server,
                     msa_server_url=msa_server_url,
                     seed=seed,
@@ -159,6 +175,11 @@ def boltz(
                     write_full_pae=write_full_pae,
                     write_full_pde=write_full_pde,
                     cache=cache,
+                    # Boltz-2 only
+                    affinity_mw_correction=affinity_mw_correction,
+                    sampling_steps_affinity=sampling_steps_affinity,
+                    diffusion_samples_affinity=diffusion_samples_affinity,
+                    affinity_checkpoint=affinity_checkpoint,
                 )
                 futures.append(executor.submit(gpu_worker, cmd, gpu_queue))
                 output_paths.append(_output_path)
@@ -202,6 +223,7 @@ def boltz(
 def _build_boltz_command(
     run: StructurePredictionRun,
     output_path: str,
+    model: str,
     seed: int = 42,
     use_msa_server: bool = True,
     msa_server_url: str = "https://api.colabfold.com",
@@ -215,6 +237,11 @@ def _build_boltz_command(
     write_full_pae: bool = False,
     write_full_pde: bool = False,
     cache: str = "~/.boltz",
+    # Boltz-2 only
+    affinity_mw_correction: bool = False,
+    sampling_steps_affinity: int = 200,
+    diffusion_samples_affinity: int = 5,
+    affinity_checkpoint: str | None = None,
 ) -> str:
     """
     Build a command for running `Boltz-1`_.
@@ -247,6 +274,7 @@ def _build_boltz_command(
     cmd = f"boltz predict '{yaml_path}'"
     cmd += f" --out_dir '{output_path}'"
     cmd += f" --seed {seed}"
+    cmd += f" --model {model}"
     if use_msa_server:
         cmd += " --use_msa_server"
         cmd += f" --msa_server_url '{msa_server_url}'"
@@ -263,4 +291,11 @@ def _build_boltz_command(
     if write_full_pde:
         cmd += " --write_full_pde"
     cmd += f" --cache '{cache}'"
+    if model == "boltz2":
+        cmd += f" --sampling_steps_affinity {sampling_steps_affinity}"
+        cmd += f" --diffusion_samples_affinity {diffusion_samples_affinity}"
+        if affinity_mw_correction:
+            cmd += " --affinity_mw_correction"
+        if affinity_checkpoint is not None:
+            cmd += f" --affinity_checkpoint '{affinity_checkpoint}'"
     return cmd
