@@ -456,6 +456,12 @@ def chai(
     # help="Path to the output directory. It will be created if it does not exist.",
 )
 @click.option(
+    "--model",
+    type=str,
+    default="boltz2",
+    help="The model to use. Options are 'boltz1' and 'boltz2'.",
+)
+@click.option(
     "--gpus",
     type=str,
     default=None,
@@ -545,6 +551,30 @@ def chai(
     "--compress_output/--no_compress_output",
     default=False,
     help="Whether to compress the output directory.",
+)
+# Boltz-2 only
+@click.option(
+    "--affinity_mw_correction/--no_affinity_mw_correction",
+    default=False,
+    help="Whether to use the affinity MW correction.",
+)
+@click.option(
+    "--sampling_steps_affinity",
+    type=int,
+    default=200,
+    help="The number of sampling steps for affinity.",
+)
+@click.option(
+    "--diffusion_samples_affinity",
+    type=int,
+    default=5,
+    help="The number of diffusion samples for affinity.",
+)
+@click.option(
+    "--affinity_checkpoint",
+    type=str,
+    default=None,
+    help="The path to the affinity checkpoint.",
 )
 def boltz(
     json_path: str,
