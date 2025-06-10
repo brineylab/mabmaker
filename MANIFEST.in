@@ -7,5 +7,4 @@ recursive-include mabmaker/tools *
 recursive-include mabmaker/utils *
 recursive-include mabmaker/models *
 
-# Exclude common unwanted files/directories
 global-exclude *.py[cod] __pycache__ .DS_Store
