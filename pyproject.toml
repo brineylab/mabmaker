@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "mabmaker"
-version = "0.1.0" # Will be dynamically read from mabmaker/version.py
+dynamic = ["version"]
 authors = [
   { name="Bryan Briney", email="briney@scripps.edu" },
 ]
@@ -46,9 +46,8 @@ packages = ["mabmaker"] # Specify the main package
 include-package-data = true # This will tell setuptools to respect MANIFEST.in or other SCM integration
 
 [tool.setuptools.dynamic]
-version = {file = "mabmaker/version.py"}
+version = {attr = "abutils.version.__version__"}
 
-# It's good practice to also define where to find packages if not in the root
 [tool.setuptools.packages.find]
 where = ["."] # search in the root directory
 include = ["mabmaker*"] # include all packages starting with mabmaker
