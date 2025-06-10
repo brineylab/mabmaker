@@ -2,25 +2,10 @@ include README.md
 include LICENSE
 include requirements*
 
-include mabmaker/*
+recursive-include mabmaker/scripts *
+recursive-include mabmaker/tools *
+recursive-include mabmaker/utils *
+recursive-include mabmaker/models *
 
-include mabmaker/scripts/*
-include mabmaker/tools/*
-include mabmaker/utils/*
-
-include mabmaker/models/*
-include mabmaker/models/LigandMPNN/*
-include mabmaker/models/LigandMPNN/inputs/*
-include mabmaker/models/LigandMPNN/model_params/*
-include mabmaker/models/LigandMPNN/openfold/*
-include mabmaker/models/LigandMPNN/openfold/data/*
-include mabmaker/models/LigandMPNN/openfold/data/tools/*
-include mabmaker/models/LigandMPNN/openfold/np/*
-include mabmaker/models/LigandMPNN/openfold/np/relax/*
-include mabmaker/models/LigandMPNN/openfold/resources/*
-include mabmaker/models/LigandMPNN/openfold/utils/*
-include mabmaker/models/LigandMPNN/training/*
-
-include mabmaker/models/Protenix/*
-include mabmaker/models/Protenix/configs/*
-include mabmaker/models/Protenix/runner/*
+# Exclude common unwanted files/directories
+global-exclude *.py[cod] __pycache__ .DS_Store
