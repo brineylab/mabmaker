@@ -1,0 +1,55 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mabmaker"
+version = "0.1.0" # Will be dynamically read from mabmaker/version.py
+authors = [
+  { name="Bryan Briney", email="briney@scripps.edu" },
+]
+description = "mAb maker: in silico antibody design."
+readme = "README.md"
+requires-python = ">=3.10"
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Bio-Informatics",
+]
+dependencies = [
+    "abutils",
+    "click",
+    "magika",
+    "natsort",
+    "numpy",
+    "prody",
+    "pyyaml",
+    "requests",
+    "torch",
+    "tqdm",
+]
+
+[project.urls]
+"Homepage" = "https://github.com/brineylab/mabmaker"
+
+[project.scripts]
+mabmaker = "mabmaker.scripts.mabmaker:cli"
+
+[tool.setuptools]
+packages = ["mabmaker"] # Specify the main package
+include-package-data = true # This will tell setuptools to respect MANIFEST.in or other SCM integration
+
+[tool.setuptools.dynamic]
+version = {file = "mabmaker/version.py"}
+
+# It's good practice to also define where to find packages if not in the root
+[tool.setuptools.packages.find]
+where = ["."] # search in the root directory
+include = ["mabmaker*"] # include all packages starting with mabmaker
+exclude = ["tests*"] # exclude tests package
