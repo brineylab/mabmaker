@@ -35,7 +35,7 @@ def setup_structure_prediction_run(
     if os.path.isdir(json_path):
         json_paths = [
             f
-            for f in abutils.list_files(json_path)
+            for f in abutils.io.list_files(json_path)
             if magika.identify_path(Path(f)).output.label == "json"
         ]
     else:
