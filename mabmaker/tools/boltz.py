@@ -144,8 +144,10 @@ def boltz(
     if step_scale is None:
         if model == "boltz1":
             step_scale = 1.638
+            tqdm_desc = "Boltz-1: "
         elif model == "boltz2":
             step_scale = 1.5
+            tqdm_desc = "Boltz-2: "
         else:
             raise ValueError(f"Invalid model name: {model}")
 
@@ -187,7 +189,7 @@ def boltz(
         # monitor progress
         with tqdm(
             total=len(futures),
-            desc="Boltz-1: ",
+            desc=tqdm_desc,
             bar_format="{desc}{percentage:3.0f}%|{bar:25}{r_bar}",
         ) as pbar:
             for _ in cf.as_completed(futures):
