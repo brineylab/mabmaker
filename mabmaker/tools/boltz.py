@@ -132,6 +132,7 @@ def boltz(
     runs = precompute_boltz_msas(
         runs=runs,
         base_output_path=output_path,
+        msa_server_url=msa_server_url,
         use_msa_cache=use_msa_cache,
         msa_cache_dir=msa_cache_dir,
     )
